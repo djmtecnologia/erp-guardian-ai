@@ -1,57 +1,67 @@
-from fastapi import FastAPI, Depends, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
-import uvicorn
+from typing import List
+import os
+from .models import ERPMapping, AgentExecution, Base
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from dotenv import load_dotenv
 
-app = FastAPI(title="ERP Guardian AI API", version="1.0.0")
+load_dotenv()
 
-# CORS Configuration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], # In production, restrict to frontend domain
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = FastAPI(title="ERP Guardian AI - API")
+
+# DB Setup
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
+engine = create_engine(SQLALCHEMY_DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 @app.get("/")
-async def root():
-    return {"message": "ERP Guardian AI Backend is running"}
+def read_root():
+    return {"status": "ERP Guardian AI API is online"}
 
-# --- AGENT ENDPOINTS ---
+@app.get("/mappings")
+def get_mappings(db: Session = Depends(get_db)):
+    """Retorna o mapeamento de todos os arquivos do ERP."""
+    return db.query(ERPMapping).order_by(ERPMapping.updated_at.desc()).all()
 
-@app.post("/agent/register")
-async def register_agent(data: dict):
-    """Register a local agent machine"""
-    return {"status": "registered", "agent_id": "agent_123"}
+@app.get("/executions")
+def get_executions(db: Session = Depends(get_db)):
+    """Retorna o histórico de análises dos agentes."""
+    return db.query(AgentExecution).order_by(AgentExecution.created_at.desc()).limit(20).all()
 
-@app.post("/agent/heartbeat")
-async def heartbeat(agent_id: str):
-    """Keep track of agent status"""
-    return {"status": "alive"}
+@app.get("/stats")
+def get_stats(db: Session = Depends(get_db)):
+    """Estatísticas rápidas para o Dashboard."""
+    total_files = db.query(ERPMapping).count()
+    total_executions = db.query(AgentExecution).count()
+    return {
+        "total_files": total_files,
+        "total_executions": total_executions,
+        "health_score": 85 # Exemplo estático por enquanto
+    }
 
-@app.post("/agent/submit-analysis")
-async def submit_analysis(data: dict):
-    """Receive metadata and findings from local agent"""
-    # 1. Process VCS changes
-    # 2. Trigger AI Review if not done locally
-    # 3. Store report
-    return {"status": "received", "report_id": 1}
-
-# --- DASHBOARD ENDPOINTS ---
-
-@app.get("/reports")
-async def get_reports():
-    """Get all analysis reports for the dashboard"""
-    return []
-
-@app.get("/reports/{report_id}")
-async def get_report_detail(report_id: int):
-    return {"id": report_id, "findings": []}
-
-@app.get("/qa/executions")
-async def get_qa_executions():
-    return []
+@app.post("/api/telemetria")
+def post_telemetria(data: dict, db: Session = Depends(get_db)):
+    """Recebe telemetria e relatórios dos agentes e salva no histórico."""
+    execution = AgentExecution(
+        agent_id=data.get("agent_id", "unknown"),
+        status=data.get("status", "completed"),
+        context=data.get("context", {}),
+        report=data.get("report", {})
+    )
+    db.add(execution)
+    db.commit()
+    db.refresh(execution)
+    return {"status": "success", "id": execution.id}
 
 if __name__ == "__main__":
+    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
