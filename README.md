@@ -14,7 +14,7 @@ A plataforma oferece uma arquitetura modular e escalável para monitorar, analis
 - **QA Automatizado**: Integração com **FlaUI** para automação de interface em módulos Delphi (Pedidos, Notas Fiscais, Estoque, etc.).
 - **Consistência de Banco de Dados**: Verificações automatizadas em bancos Oracle para garantir a integridade dos dados durante atualizações.
 - **Segurança em Primeiro Lugar**: Comunicação HTTPS apenas de saída (outbound-only), garantindo exposição zero de portas de entrada.
-
+-
 ---
 
 ## 🏗️ Arquitetura
