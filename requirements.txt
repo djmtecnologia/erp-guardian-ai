@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+sqlalchemy
+google-generativeai
+python-dotenv
+psycopg2-binary
+watchdog
