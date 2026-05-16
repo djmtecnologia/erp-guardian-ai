@@ -5,3 +5,4 @@ google-generativeai
 python-dotenv
 psycopg2-binary
 watchdog
+python-multipart

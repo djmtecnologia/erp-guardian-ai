@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Shield, Activity, FileText, CheckCircle, AlertTriangle, Search, Terminal } from 'lucide-react';
+import { Shield, Activity, FileText, CheckCircle, AlertTriangle, Search, Terminal, Bot } from 'lucide-react';
+import Link from 'next/link';
 
 const Dashboard = () => {
   const [stats, setStats] = useState({ total_files: 0, executions: 0, health: 0 });
@@ -36,9 +37,14 @@ const Dashboard = () => {
           </h1>
           <p className="text-slate-500">Autonomous Enterprise Software Factory</p>
         </div>
-        <div className="bg-slate-900/50 border border-slate-800 px-4 py-2 rounded-lg flex items-center gap-2">
-          <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-          <span className="text-sm font-medium">System Online</span>
+        <div className="flex items-center gap-4">
+          <Link href="/support" className="bg-blue-600/20 text-blue-400 border border-blue-600/50 hover:bg-blue-600 hover:text-white px-4 py-2 rounded-lg flex items-center gap-2 transition font-medium text-sm">
+            <Bot size={16} /> Resolver Chamado (N3)
+          </Link>
+          <div className="bg-slate-900/50 border border-slate-800 px-4 py-2 rounded-lg flex items-center gap-2">
+            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+            <span className="text-sm font-medium">System Online</span>
+          </div>
         </div>
       </header>
 

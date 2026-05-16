@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
+import shutil
 from sqlalchemy.orm import Session
 from typing import List
 import os
@@ -62,4 +63,44 @@ def post_telemetria(data: dict, db: Session = Depends(get_db)):
     db.add(execution)
     db.commit()
     db.refresh(execution)
-    return {"status": "success", "id": execution.id}
+@app.post("/api/support")
+async def solve_support_ticket(
+    description: str = Form(...),
+    files: List[UploadFile] = File(...)
+):
+    try:
+        from agents.support_agent.agent import SupportResolutionAgent
+        
+        # O Vercel permite salvar em /tmp (Lambda)
+        tmp_dir = "/tmp/erp_support_uploads"
+        os.makedirs(tmp_dir, exist_ok=True)
+        
+        saved_files = []
+        for file in files:
+            file_path = os.path.join(tmp_dir, file.filename)
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            saved_files.append(file_path)
+            
+        agent = SupportResolutionAgent(api_key=os.getenv("GEMINI_API_KEY"))
+        context = {
+            "description": description,
+            "files": saved_files
+        }
+        
+        report = await agent.execute(context)
+        
+        # Limpeza
+        for f in saved_files:
+            try:
+                os.remove(f)
+            except:
+                pass
+                
+        if report.status.value == "completed":
+            return {"status": "success", "solution": report.findings[0].get("content")}
+        else:
+            return {"status": "error", "message": "A IA não conseguiu processar a análise."}
+            
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
