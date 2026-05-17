@@ -8,11 +8,7 @@ import sys
 # Adiciona o caminho para encontrar os modelos na raiz se necessário
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Importação relativa dependendo da estrutura
-try:
-    from backend.models import ERPMapping, AgentExecution, Base
-except ImportError:
-    from models import ERPMapping, AgentExecution, Base
+from models import ERPMapping, AgentExecution, Base
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -63,6 +59,7 @@ def post_telemetria(data: dict, db: Session = Depends(get_db)):
     db.add(execution)
     db.commit()
     db.refresh(execution)
+    return {"status": "success", "id": execution.id}
 @app.post("/api/support")
 async def solve_support_ticket(
     description: str = Form(...),

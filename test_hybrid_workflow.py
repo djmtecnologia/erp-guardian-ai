@@ -72,7 +72,7 @@ async def test_hybrid():
     ia_report = next(r for r in final_context["execution_history"] if r.agent_id == "delphi-review-agent")
     
     if ia_report.status.value == "completed" and ia_report.findings:
-        print(f"\nFeedback da IA (Dinâmico):\n{ia_report.findings[0].get('review', 'Sem detalhes.')}")
+        print(f"\nFeedback da IA (Dinâmico):\n{ia_report.findings[0].get('content', 'Sem detalhes.')}")
     elif ia_report.status.value == "failed":
         error_msg = ia_report.findings[0].get("error", "Erro desconhecido")
         print(f"\n❌ A IA falhou com o erro: {error_msg}")

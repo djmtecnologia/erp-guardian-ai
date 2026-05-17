@@ -45,7 +45,7 @@ async def main():
     }
     review_report = await engine.run_standalone("delphi-review-agent", review_context)
     
-    print(f"\nReview Findings:\n{review_report.findings[0]['review']}")
+    print(f"\nReview Findings:\n{review_report.findings[0]['content']}")
 
     print("\n" + "="*50)
     print("TESTE 3: PIPELINE EXECUTION (Doc -> Review)")

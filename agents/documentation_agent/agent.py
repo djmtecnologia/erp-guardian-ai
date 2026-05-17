@@ -4,7 +4,12 @@ from shared.base_agent import BaseAgent, AgentStatus, AgentReport
 import google.generativeai as genai
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from backend.models import ERPMapping
+try:
+    from models import ERPMapping
+except ImportError:
+    import sys
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+    from models import ERPMapping
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -83,7 +88,7 @@ class DocumentationAgent(BaseAgent):
             mapping.content_summary = summary
             mapping.embedding = vector
             mapping.module_name = os.path.basename(file_path)
-            self.findings.append({"file": file_path, "status": "persisted"})
+            self.findings.append({"file": file_path, "status": "persisted", "summary": summary})
 
         except Exception as e:
             print(f"[DocumentationAgent] Falha em {file_path}: {e}")

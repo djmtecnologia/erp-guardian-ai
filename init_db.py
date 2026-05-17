@@ -1,6 +1,6 @@
 import os
 from sqlalchemy import create_engine
-from backend.models import Base
+from models import Base
 from dotenv import load_dotenv
 
 load_dotenv()
