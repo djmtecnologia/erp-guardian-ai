@@ -7,9 +7,11 @@ class DelphiReviewAgent(BaseAgent):
     def __init__(self, api_key: str):
         super().__init__("delphi-review-agent")
         genai.configure(api_key=api_key)
-        # Lista de modelos para fallback em caso de erro de cota (429)
         self.model_priorities = [
             'gemini-2.0-flash-lite',
+            'gemini-1.5-flash-latest',
+            'gemini-1.5-pro-latest',
+            'gemini-2.0-flash',
             'gemini-flash-latest',
             'gemini-pro-latest',
             'gemini-3.1-flash-lite'

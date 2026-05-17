@@ -20,6 +20,9 @@ class DocumentationAgent(BaseAgent):
         genai.configure(api_key=api_key)
         self.model_priorities = [
             'gemini-2.0-flash-lite',
+            'gemini-1.5-flash-latest',
+            'gemini-1.5-pro-latest',
+            'gemini-2.0-flash',
             'gemini-flash-latest',
             'gemini-pro-latest',
             'gemini-3.1-flash-lite'

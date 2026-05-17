@@ -86,6 +86,75 @@ class ERPFileHandler(FileSystemEventHandler):
         except Exception as e:
             print(f"❌ Erro ao processar mudança: {e}")
 
+async def poll_ui_scan_tasks():
+    backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+    # Remove barras invertidas ou normais ao final da URL
+    backend_url = backend_url.rstrip('/')
+    
+    from agent.ui_scanner import ERPUIWatcher
+    watcher = ERPUIWatcher(backend_url)
+    
+    import requests
+    
+    while True:
+        try:
+            response = await asyncio.to_thread(requests.get, f"{backend_url}/api/ui-scan/pending")
+            data = response.json()
+            if data.get("status") == "task_found":
+                task_id = data.get("task_id")
+                exe_path = data.get("exe_path")
+                username = data.get("username")
+                password = data.get("password")
+                
+                print(f"\n[Monitor] 📥 Nova tarefa de Varredura de UI detectada! ID: {task_id}")
+                # Executa a varredura em uma thread separada para não congelar o monitoramento de arquivos
+                await asyncio.to_thread(
+                    watcher.run_scan_workflow,
+                    task_id, exe_path, username, password
+                )
+        except Exception:
+            pass
+        await asyncio.sleep(10)
+
+async def poll_qa_tasks():
+    backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+    backend_url = backend_url.rstrip('/')
+    
+    from agent.qa_engine import QAAutomationEngine
+    qa_engine = QAAutomationEngine(backend_url)
+    
+    import requests
+    
+    while True:
+        try:
+            response = await asyncio.to_thread(requests.get, f"{backend_url}/api/qa/pending")
+            data = response.json()
+            if data.get("status") == "task_found":
+                task_id = data.get("task_id")
+                scenario = data.get("scenario")
+                
+                print(f"\n[Monitor] 📥 Nova tarefa de QA detectada! ID: {task_id} - Cenário: {scenario}")
+                
+                # Executa o fluxo de testes simulado (FlaUI/pywinauto)
+                logs = await asyncio.to_thread(
+                    qa_engine.execute_qa_test,
+                    task_id, scenario
+                )
+                
+                # Envia o log gerado de volta para a nuvem processar a documentação
+                payload = {
+                    "task_id": task_id,
+                    "test_logs": logs
+                }
+                await asyncio.to_thread(
+                    requests.post,
+                    f"{backend_url}/api/qa/result",
+                    json=payload
+                )
+        except Exception:
+            pass
+        await asyncio.sleep(10)
+
 def run_monitor():
     path_to_watch = os.getenv("LOCAL_VCS_PATH", "./agent/samples")
     print(f"🛡️ ERP Guardian AI - Monitor Ativo")
@@ -97,6 +166,10 @@ def run_monitor():
     from threading import Thread
     thread = Thread(target=loop.run_forever, daemon=True)
     thread.start()
+
+    # Registra os ouvintes contínuos de tarefas da Vercel
+    asyncio.run_coroutine_threadsafe(poll_ui_scan_tasks(), loop)
+    asyncio.run_coroutine_threadsafe(poll_qa_tasks(), loop)
 
     event_handler = ERPFileHandler(loop)
     observer = Observer()

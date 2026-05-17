@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Shield, Activity, FileText, CheckCircle, AlertTriangle, Search, Terminal, Bot } from 'lucide-react';
+import { Shield, Activity, FileText, CheckCircle, AlertTriangle, Search, Terminal, Bot, Cpu, ClipboardList } from 'lucide-react';
 import Link from 'next/link';
 
 const Dashboard = () => {
@@ -38,6 +38,12 @@ const Dashboard = () => {
           <p className="text-slate-500">Autonomous Enterprise Software Factory</p>
         </div>
         <div className="flex items-center gap-4">
+          <Link href="/qa" className="bg-purple-600/20 text-purple-400 border border-purple-600/50 hover:bg-purple-600 hover:text-white px-4 py-2 rounded-lg flex items-center gap-2 transition font-medium text-sm">
+            <ClipboardList size={16} /> Pipeline de QA
+          </Link>
+          <Link href="/scanner" className="bg-emerald-600/20 text-emerald-400 border border-emerald-600/50 hover:bg-emerald-600 hover:text-white px-4 py-2 rounded-lg flex items-center gap-2 transition font-medium text-sm">
+            <Cpu size={16} /> Sonda Scanner UI
+          </Link>
           <Link href="/support" className="bg-blue-600/20 text-blue-400 border border-blue-600/50 hover:bg-blue-600 hover:text-white px-4 py-2 rounded-lg flex items-center gap-2 transition font-medium text-sm">
             <Bot size={16} /> Resolver Chamado (N3)
           </Link>

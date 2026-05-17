@@ -1,5 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 
@@ -15,8 +14,8 @@ class ERPMapping(Base):
     file_path = Column(String, unique=True, index=True)
     module_name = Column(String, index=True)
     content_summary = Column(Text)
-    embedding = Column(JSONB)       # Armazena o vetor como JSONB no Neon
-    metadata_info = Column(JSONB)   # Associações de workflow, dependências, etc.
+    embedding = Column(JSON)       # Mapeia para JSONB no Postgres / JSON no SQLite
+    metadata_info = Column(JSON)   # Associações de workflow, dependências, etc.
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -29,8 +28,8 @@ class AgentExecution(Base):
     id = Column(Integer, primary_key=True)
     agent_id = Column(String, nullable=False)
     status = Column(String, nullable=False)
-    context = Column(JSONB)
-    report = Column(JSONB)
+    context = Column(JSON)
+    report = Column(JSON)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class RiskAnalysis(Base):
@@ -42,6 +41,54 @@ class RiskAnalysis(Base):
     id = Column(Integer, primary_key=True)
     file_path = Column(String, index=True)
     risk_level = Column(String)  # LOW, MEDIUM, HIGH, CRITICAL
-    vulnerabilities = Column(JSONB)
+    vulnerabilities = Column(JSON)
     recommendations = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class ERPScanTask(Base):
+    """
+    Fila de tarefas de varredura de UI a serem executadas pelo agente local Windows.
+    """
+    __tablename__ = "erp_scan_tasks"
+
+    id = Column(Integer, primary_key=True)
+    exe_path = Column(String, nullable=False)
+    username = Column(String, nullable=False)
+    password = Column(String, nullable=False)
+    status = Column(String, default="pending")  # pending, running, completed, failed
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class ERPUIKnowledge(Base):
+    """
+    Base de conhecimento gerada a partir da varredura de interface do ERP.
+    """
+    __tablename__ = "erp_ui_knowledge"
+
+    id = Column(Integer, primary_key=True)
+    screen_name = Column(String, index=True)
+    controls = Column(JSON)  # Árvore de botões, inputs, menus mapeados
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class QATask(Base):
+    """
+    Fila de tarefas de automação de testes de interface (QA) a serem executadas localmente no Windows.
+    """
+    __tablename__ = "qa_tasks"
+
+    id = Column(Integer, primary_key=True)
+    scenario = Column(Text, nullable=False)  # Descrição do cenário a ser testado
+    status = Column(String, default="pending")  # pending, running, completed, failed
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class QAReport(Base):
+    """
+    Relatórios de testes de QA e Manuais de Usuário gerados pela IA.
+    """
+    __tablename__ = "qa_reports"
+
+    id = Column(Integer, primary_key=True)
+    task_id = Column(Integer, ForeignKey("qa_tasks.id"))
+    test_logs = Column(JSON)            # Logs brutos da automação de UI
+    test_report_md = Column(Text)       # Relatório de Teste estruturado em Markdown
+    user_manual_md = Column(Text)       # Manual do Usuário Final em Markdown
     created_at = Column(DateTime(timezone=True), server_default=func.now())
