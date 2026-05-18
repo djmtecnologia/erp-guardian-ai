@@ -11,6 +11,12 @@ export default function SupportTicket() {
   const [solution, setSolution] = useState(null);
   const [error, setError] = useState(null);
 
+  // Configuração opcional de conexão ao banco de dados Oracle da empresa
+  const [useOracle, setUseOracle] = useState(false);
+  const [oracleUser, setOracleUser] = useState("");
+  const [oraclePassword, setOraclePassword] = useState("");
+  const [oracleTns, setOracleTns] = useState("XE");
+
   const handleFileChange = (e) => {
     setFiles(Array.from(e.target.files));
   };
@@ -31,6 +37,12 @@ export default function SupportTicket() {
     files.forEach(file => {
       formData.append("files", file);
     });
+
+    if (useOracle) {
+      formData.append("oracle_user", oracleUser);
+      formData.append("oracle_password", oraclePassword);
+      formData.append("oracle_tns", oracleTns);
+    }
 
     try {
       const response = await fetch('/api/support', {
@@ -94,6 +106,63 @@ export default function SupportTicket() {
                 </div>
                 <input type="file" multiple className="hidden" onChange={handleFileChange} />
               </label>
+            </div>
+
+            {/* Seção de Conexão Oracle Opcional */}
+            <div className="bg-slate-950/40 border border-slate-800/80 p-4 rounded-xl space-y-4">
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <input 
+                  type="checkbox" 
+                  checked={useOracle} 
+                  onChange={(e) => setUseOracle(e.target.checked)} 
+                  className="rounded border-slate-800 text-blue-600 focus:ring-blue-500 bg-slate-900 w-4 h-4"
+                />
+                <span className="text-sm font-medium text-slate-300">🔌 Conectar ao Banco de Dados Oracle (Opcional)</span>
+              </label>
+
+              {useOracle && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-800/40">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">
+                      Usuário do Banco (Ex: SYSTEM)
+                    </label>
+                    <input 
+                      type="text" 
+                      placeholder="Usuário" 
+                      value={oracleUser} 
+                      onChange={(e) => setOracleUser(e.target.value)} 
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition"
+                      required={useOracle}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">
+                      Senha do Banco
+                    </label>
+                    <input 
+                      type="password" 
+                      placeholder="Senha" 
+                      value={oraclePassword} 
+                      onChange={(e) => setOraclePassword(e.target.value)} 
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition"
+                      required={useOracle}
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-medium text-slate-500 mb-1">
+                      Conexão TNS (Definida no tnsnames.ora local, ex: XE, PROD)
+                    </label>
+                    <input 
+                      type="text" 
+                      placeholder="XE" 
+                      value={oracleTns} 
+                      onChange={(e) => setOracleTns(e.target.value)} 
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition"
+                      required={useOracle}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             {error && (

@@ -29,6 +29,7 @@ pyinstaller --noconfirm --onedir --console --name "ERPGuardianAgent" `
     --hidden-import "sqlalchemy" `
     --hidden-import "psycopg2" `
     --hidden-import "google.generativeai" `
+    --hidden-import "oracledb" `
     agent/runtime.py
 
 if ($LASTEXITCODE -eq 0) {

@@ -63,7 +63,10 @@ def post_telemetria(data: dict, db: Session = Depends(get_db)):
 @app.post("/api/support")
 async def solve_support_ticket(
     description: str = Form(...),
-    files: List[UploadFile] = File(...)
+    files: List[UploadFile] = File(...),
+    oracle_user: str = Form(None),
+    oracle_password: str = Form(None),
+    oracle_tns: str = Form(None)
 ):
     try:
         from agents.support_agent.agent import SupportResolutionAgent
@@ -82,7 +85,10 @@ async def solve_support_ticket(
         agent = SupportResolutionAgent(api_key=os.getenv("GEMINI_API_KEY"))
         context = {
             "description": description,
-            "files": saved_files
+            "files": saved_files,
+            "oracle_user": oracle_user,
+            "oracle_password": oracle_password,
+            "oracle_tns": oracle_tns
         }
         
         report = await agent.execute(context)
