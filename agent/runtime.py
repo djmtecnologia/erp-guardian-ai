@@ -5,6 +5,7 @@ import asyncio
 
 # Adiciona a raiz do projeto ao sys.path para permitir importações modulares
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import models
 
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -157,6 +158,10 @@ async def poll_qa_tasks():
 
 def run_monitor():
     path_to_watch = os.getenv("LOCAL_VCS_PATH", "./agent/samples")
+    
+    # Auto-cura: Cria a pasta se ela não existir física no diretório
+    os.makedirs(path_to_watch, exist_ok=True)
+    
     print(f"🛡️ ERP Guardian AI - Monitor Ativo")
     print(f"👀 Vigiando diretório: {os.path.abspath(path_to_watch)}")
     

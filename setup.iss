@@ -14,7 +14,7 @@ PrivilegesRequired=lowest
 OutputDir=.\dist
 
 [Tasks]
-Name="desktopicon"; Description="Criar atalho na Área de Trabalho"; GroupDescription="Atalhos Adicionais:"; Flags: unchecked
+Name: "desktopicon"; Description: "Criar atalho na Área de Trabalho"; GroupDescription: "Atalhos Adicionais:"; Flags: unchecked
 
 [Files]
 ; Inclui os arquivos gerados pelo PyInstaller na pasta 'dist\ERPGuardianAgent'

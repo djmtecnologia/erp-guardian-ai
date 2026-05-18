@@ -17,6 +17,7 @@ Remove-Item -Recurse -Force -ErrorAction SilentlyContinue build, dist
 # Incluímos todas as subpastas e dependências internas necessárias para o Agente funcionar sem o código Python original
 Write-Host "🚀 Compilando o Agente (Isso pode levar de 1 a 2 minutos)..." -ForegroundColor Cyan
 pyinstaller --noconfirm --onedir --console --name "ERPGuardianAgent" `
+    --paths="." `
     --add-data "shared;shared" `
     --add-data "orchestrator;orchestrator" `
     --add-data "workflow_engine;workflow_engine" `

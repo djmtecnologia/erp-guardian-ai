@@ -3,7 +3,7 @@
 
 a = Analysis(
     ['agent\\runtime.py'],
-    pathex=[],
+    pathex=['.'],
     binaries=[],
     datas=[('shared', 'shared'), ('orchestrator', 'orchestrator'), ('workflow_engine', 'workflow_engine'), ('agents', 'agents'), ('agent/samples', 'agent/samples')],
     hiddenimports=['pywinauto', 'watchdog', 'requests', 'sqlalchemy', 'psycopg2', 'google.generativeai'],
