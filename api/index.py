@@ -8,7 +8,7 @@ import sys
 # Adiciona o caminho para encontrar os modelos na raiz se necessário
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from models import ERPMapping, AgentExecution, Base, ERPScanTask, ERPUIKnowledge, QATask, QAReport
+from models import ERPMapping, AgentExecution, Base, ERPScanTask, ERPUIKnowledge, QATask, QAReport, SupportTask, LocalConfig
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -60,53 +60,120 @@ def post_telemetria(data: dict, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(execution)
     return {"status": "success", "id": execution.id}
+import base64
+
+@app.post("/api/support/tnsnames")
+def save_tnsnames(data: dict, db: Session = Depends(get_db)):
+    tns_names = data.get("tns_names", [])
+    config = db.query(LocalConfig).filter(LocalConfig.key == "tns_names").first()
+    if not config:
+        config = LocalConfig(key="tns_names", value=tns_names)
+        db.add(config)
+    else:
+        config.value = tns_names
+    db.commit()
+    return {"status": "success"}
+
+@app.get("/api/support/tnsnames")
+def get_tnsnames(db: Session = Depends(get_db)):
+    config = db.query(LocalConfig).filter(LocalConfig.key == "tns_names").first()
+    if config:
+        return {"tns_names": config.value}
+    return {"tns_names": ["XE"]}
+
 @app.post("/api/support")
 async def solve_support_ticket(
     description: str = Form(...),
     files: List[UploadFile] = File(...),
     oracle_user: str = Form(None),
     oracle_password: str = Form(None),
-    oracle_tns: str = Form(None)
+    oracle_tns: str = Form(None),
+    db: Session = Depends(get_db)
 ):
     try:
-        from agents.support_agent.agent import SupportResolutionAgent
-        
-        # O Vercel permite salvar em /tmp (Lambda)
-        tmp_dir = "/tmp/erp_support_uploads"
-        os.makedirs(tmp_dir, exist_ok=True)
-        
-        saved_files = []
+        # Processamento seguro dos arquivos anexados para JSON (codificando Base64 se for binário)
+        processed_files = []
         for file in files:
-            file_path = os.path.join(tmp_dir, file.filename)
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-            saved_files.append(file_path)
-            
-        agent = SupportResolutionAgent(api_key=os.getenv("GEMINI_API_KEY"))
-        context = {
-            "description": description,
-            "files": saved_files,
-            "oracle_user": oracle_user,
-            "oracle_password": oracle_password,
-            "oracle_tns": oracle_tns
-        }
-        
-        report = await agent.execute(context)
-        
-        # Limpeza
-        for f in saved_files:
-            try:
-                os.remove(f)
-            except:
-                pass
+            content = await file.read()
+            if not file.filename:
+                continue
+            ext = file.filename.lower().split('.')[-1]
+            if ext in ['png', 'jpg', 'jpeg', 'webp']:
+                encoded = base64.b64encode(content).decode('utf-8')
+                processed_files.append({
+                    "filename": file.filename,
+                    "content": encoded,
+                    "is_binary": True
+                })
+            else:
+                try:
+                    text_content = content.decode('utf-8', errors='ignore')
+                except Exception:
+                    text_content = content.decode('latin-1', errors='ignore')
+                processed_files.append({
+                    "filename": file.filename,
+                    "content": text_content,
+                    "is_binary": False
+                })
                 
-        if report.status.value == "completed":
-            return {"status": "success", "solution": report.findings[0].get("content")}
-        else:
-            return {"status": "error", "message": "A IA não conseguiu processar a análise."}
-            
+        # Enfileira a tarefa para o agente local resolver
+        task = SupportTask(
+            description=description,
+            files=processed_files,
+            oracle_user=oracle_user,
+            oracle_password=oracle_password,
+            oracle_tns=oracle_tns,
+            status="pending"
+        )
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+        
+        return {"status": "queued", "task_id": task.id}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+@app.get("/api/support/pending")
+def get_pending_support_task(db: Session = Depends(get_db)):
+    task = db.query(SupportTask).filter(SupportTask.status == "pending").order_by(SupportTask.created_at.asc()).first()
+    if task:
+        # Atualiza para running para evitar múltiplos agentes pegando a mesma tarefa
+        task.status = "running"
+        db.commit()
+        return {
+            "status": "task_found",
+            "task_id": task.id,
+            "description": task.description,
+            "oracle_user": task.oracle_user,
+            "oracle_password": task.oracle_password,
+            "oracle_tns": task.oracle_tns,
+            "files": task.files
+        }
+    return {"status": "no_tasks"}
+
+@app.post("/api/support/result")
+def post_support_result(data: dict, db: Session = Depends(get_db)):
+    task_id = data.get("task_id")
+    status = data.get("status")
+    solution = data.get("solution")
+    
+    task = db.query(SupportTask).filter(SupportTask.id == task_id).first()
+    if task:
+        task.status = status
+        task.solution = solution
+        db.commit()
+        return {"status": "success"}
+    return {"status": "error", "message": "Tarefa de suporte não encontrada."}
+
+@app.get("/api/support/status/{task_id}")
+def get_support_status(task_id: int, db: Session = Depends(get_db)):
+    task = db.query(SupportTask).filter(SupportTask.id == task_id).first()
+    if task:
+        return {
+            "status": task.status,
+            "solution": task.solution
+        }
+    return {"status": "not_found"}
 
 # --- ENDPOINTS DO UI SCANNER (VARREDURA WINDOWS) ---
 

@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from 'react';
-import { Shield, Upload, FileText, Bot, AlertCircle, CheckCircle2, ArrowLeft } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Shield, Upload, FileText, Bot, AlertCircle, CheckCircle2, ArrowLeft, Search, ChevronDown } from 'lucide-react';
 import Link from 'next/link';
 
 export default function SupportTicket() {
@@ -16,6 +16,29 @@ export default function SupportTicket() {
   const [oracleUser, setOracleUser] = useState("");
   const [oraclePassword, setOraclePassword] = useState("");
   const [oracleTns, setOracleTns] = useState("XE");
+
+  // Autocomplete e busca de perfis TNS do tnsnames.ora local
+  const [tnsOptions, setTnsOptions] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
+
+  useEffect(() => {
+    const fetchTns = async () => {
+      try {
+        const res = await fetch('/api/support/tnsnames');
+        const data = await res.json();
+        if (data.tns_names && data.tns_names.length > 0) {
+          setTnsOptions(data.tns_names);
+          setOracleTns(data.tns_names[0]);
+        }
+      } catch (err) {
+        console.error("Erro ao buscar tnsnames sincronizados:", err);
+      }
+    };
+    if (useOracle) {
+      fetchTns();
+    }
+  }, [useOracle]);
 
   const handleFileChange = (e) => {
     setFiles(Array.from(e.target.files));
@@ -52,14 +75,38 @@ export default function SupportTicket() {
       
       const data = await response.json();
       
-      if (data.status === "success") {
+      if (data.status === "queued") {
+        const taskId = data.task_id;
+        // Inicia o loop de consulta do chamado resolvido pelo agente local
+        const intervalId = setInterval(async () => {
+          try {
+            const statusRes = await fetch(`/api/support/status/${taskId}`);
+            const statusData = await statusRes.json();
+            
+            if (statusData.status === "completed") {
+              clearInterval(intervalId);
+              setSolution(statusData.solution);
+              setLoading(false);
+            } else if (statusData.status === "failed") {
+              clearInterval(intervalId);
+              setError("O Agente local no Windows encontrou um erro ao processar o chamado.");
+              setLoading(false);
+            }
+          } catch (pollErr) {
+            clearInterval(intervalId);
+            setError("Erro ao monitorar a resposta do agente local.");
+            setLoading(false);
+          }
+        }, 3000);
+      } else if (data.status === "success") {
         setSolution(data.solution);
+        setLoading(false);
       } else {
         setError(data.message || "Erro desconhecido ao analisar o chamado.");
+        setLoading(false);
       }
     } catch (err) {
       setError("Falha na comunicação com o servidor.");
-    } finally {
       setLoading(false);
     }
   };
@@ -148,18 +195,59 @@ export default function SupportTicket() {
                       required={useOracle}
                     />
                   </div>
-                  <div className="md:col-span-2">
+                  <div className="md:col-span-2 relative">
                     <label className="block text-xs font-medium text-slate-500 mb-1">
-                      Conexão TNS (Definida no tnsnames.ora local, ex: XE, PROD)
+                      Conexão TNS (Auto-detectada do tnsnames.ora local)
                     </label>
-                    <input 
-                      type="text" 
-                      placeholder="XE" 
-                      value={oracleTns} 
-                      onChange={(e) => setOracleTns(e.target.value)} 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 transition"
-                      required={useOracle}
-                    />
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setIsOpen(!isOpen)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 text-left focus:outline-none focus:border-blue-500 transition flex items-center justify-between"
+                      >
+                        <span>{oracleTns || "Selecione uma conexão..."}</span>
+                        <ChevronDown size={14} className="text-slate-400" />
+                      </button>
+
+                      {isOpen && (
+                        <div className="absolute z-50 w-full mt-1 bg-slate-950 border border-slate-800 rounded-lg shadow-xl max-h-48 overflow-y-auto p-2 space-y-2">
+                          <div className="relative flex items-center">
+                            <Search size={12} className="absolute left-2.5 text-slate-500" />
+                            <input
+                              type="text"
+                              placeholder="Pesquisar conexão..."
+                              value={searchTerm}
+                              onChange={(e) => setSearchTerm(e.target.value)}
+                              className="w-full bg-slate-900 border border-slate-800 rounded p-1.5 pl-7 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                            />
+                          </div>
+
+                          <div className="space-y-0.5">
+                            {tnsOptions
+                              .filter(opt => opt.toLowerCase().includes(searchTerm.toLowerCase()))
+                              .map((opt) => (
+                                <button
+                                  key={opt}
+                                  type="button"
+                                  onClick={() => {
+                                    setOracleTns(opt);
+                                    setIsOpen(false);
+                                    setSearchTerm("");
+                                  }}
+                                  className="w-full text-left text-xs p-2 rounded hover:bg-blue-600/20 hover:text-blue-400 transition"
+                                >
+                                  {opt}
+                                </button>
+                              ))}
+                            {tnsOptions.filter(opt => opt.toLowerCase().includes(searchTerm.toLowerCase())).length === 0 && (
+                              <div className="text-xs text-slate-600 text-center py-2">
+                                Nenhuma conexão encontrada.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}

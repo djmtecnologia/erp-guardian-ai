@@ -92,3 +92,30 @@ class QAReport(Base):
     test_report_md = Column(Text)       # Relatório de Teste estruturado em Markdown
     user_manual_md = Column(Text)       # Manual do Usuário Final em Markdown
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class SupportTask(Base):
+    """
+    Fila de chamados de suporte N3 a serem resolvidos localmente com conexão Oracle corporativa.
+    """
+    __tablename__ = "support_tasks"
+
+    id = Column(Integer, primary_key=True)
+    description = Column(Text, nullable=False)
+    files = Column(JSON, nullable=True) # Lista de caminhos ou conteúdos dos anexos
+    oracle_user = Column(String, nullable=True)
+    oracle_password = Column(String, nullable=True)
+    oracle_tns = Column(String, nullable=True)
+    status = Column(String, default="pending")  # pending, running, completed, failed
+    solution = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class LocalConfig(Base):
+    """
+    Configurações locais sincronizadas do ambiente Windows do cliente (ex: tnsnames.ora).
+    """
+    __tablename__ = "local_configs"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String, unique=True, index=True)
+    value = Column(JSON)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())

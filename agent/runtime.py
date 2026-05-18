@@ -156,11 +156,124 @@ async def poll_qa_tasks():
             pass
         await asyncio.sleep(10)
 
+def sync_tnsnames():
+    tnsnames_path = r"C:\app\client\oracle\product\19.0.0\client_1\network\admin\tnsnames.ora"
+    tns_names = []
+    if os.path.exists(tnsnames_path):
+        try:
+            import re
+            with open(tnsnames_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            content = re.sub(r'#.*', '', content)
+            lines = [line.strip() for line in content.splitlines()]
+            clean_content = "".join([l for l in lines if l])
+            matches = re.findall(r'([a-zA-Z0-9_\-\.]+)\s*=\s*(\((?:[^\(\)]*|\((?:[^\(\)]*|\((?:[^\(\)]*|\([^\(\)]*\))*\))*\))*\))', clean_content)
+            tns_names = [m[0].upper().strip() for m in matches]
+            print(f"[Monitor] 🔌 Encontrados {len(tns_names)} perfis no tnsnames.ora local: {tns_names}")
+        except Exception as e:
+            print(f"[Monitor] Erro ao parsear tnsnames.ora: {e}")
+            
+    backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+    backend_url = backend_url.rstrip('/')
+    try:
+        import requests
+        requests.post(f"{backend_url}/api/support/tnsnames", json={"tns_names": tns_names})
+        print(f"[Monitor] 🌐 Perfis TNS sincronizados com a nuvem Vercel!")
+    except Exception as e:
+        print(f"[Monitor] Erro ao sincronizar TNS com a nuvem: {e}")
+
+async def poll_support_tasks():
+    backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+    backend_url = backend_url.rstrip('/')
+    
+    import requests
+    import os
+    
+    while True:
+        try:
+            response = await asyncio.to_thread(requests.get, f"{backend_url}/api/support/pending")
+            data = response.json()
+            if data.get("status") == "task_found":
+                task_id = data.get("task_id")
+                description = data.get("description")
+                oracle_user = data.get("oracle_user")
+                oracle_password = data.get("oracle_password")
+                oracle_tns = data.get("oracle_tns")
+                files_list = data.get("files", [])
+                
+                print(f"\n[Monitor] 📥 Novo chamado N3 recebido para resolver localmente! ID: {task_id}")
+                
+                # Reconstruir arquivos anexados localmente na pasta temporária
+                import tempfile
+                import base64
+                import shutil
+                
+                temp_dir = tempfile.mkdtemp(prefix="erp_support_")
+                reconstructed_paths = []
+                
+                for f_dict in files_list:
+                    filename = f_dict.get("filename")
+                    content = f_dict.get("content", "")
+                    is_binary = f_dict.get("is_binary", False)
+                    
+                    file_path = os.path.join(temp_dir, filename)
+                    try:
+                        if is_binary:
+                            with open(file_path, "wb") as f_out:
+                                f_out.write(base64.b64decode(content))
+                        else:
+                            with open(file_path, "w", encoding="utf-8", errors="ignore") as f_out:
+                                f_out.write(content)
+                        reconstructed_paths.append(file_path)
+                    except Exception as fe:
+                        print(f"[Monitor] Erro ao reconstruir arquivo {filename}: {fe}")
+                
+                from agents.support_agent.agent import SupportResolutionAgent
+                agent = SupportResolutionAgent(api_key=API_KEY)
+                
+                context = {
+                    "description": description,
+                    "files": reconstructed_paths,
+                    "oracle_user": oracle_user,
+                    "oracle_password": oracle_password,
+                    "oracle_tns": oracle_tns
+                }
+                
+                report = await agent.execute(context)
+                
+                solution_text = ""
+                if report.status.value == "completed":
+                    solution_text = report.findings[0].get("content", "")
+                else:
+                    solution_text = f"Erro na análise técnica do suporte local: {report.findings}"
+                    
+                payload = {
+                    "task_id": task_id,
+                    "status": report.status.value,
+                    "solution": solution_text
+                }
+                
+                await asyncio.to_thread(
+                    requests.post,
+                    f"{backend_url}/api/support/result",
+                    json=payload
+                )
+                print(f"[Monitor] ✅ Chamado N3 ID {task_id} resolvido e enviado à nuvem!")
+                
+                # Limpeza da pasta temporária
+                shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass
+        await asyncio.sleep(10)
+
 def run_monitor():
     path_to_watch = os.getenv("LOCAL_VCS_PATH", "./agent/samples")
     
     # Auto-cura: Cria a pasta se ela não existir física no diretório
     os.makedirs(path_to_watch, exist_ok=True)
+    
+    # Sincroniza TNSnames local com a Vercel
+    sync_tnsnames()
     
     print(f"🛡️ ERP Guardian AI - Monitor Ativo")
     print(f"👀 Vigiando diretório: {os.path.abspath(path_to_watch)}")
@@ -175,6 +288,7 @@ def run_monitor():
     # Registra os ouvintes contínuos de tarefas da Vercel
     asyncio.run_coroutine_threadsafe(poll_ui_scan_tasks(), loop)
     asyncio.run_coroutine_threadsafe(poll_qa_tasks(), loop)
+    asyncio.run_coroutine_threadsafe(poll_support_tasks(), loop)
 
     event_handler = ERPFileHandler(loop)
     observer = Observer()
