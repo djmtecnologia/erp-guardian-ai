@@ -73,18 +73,29 @@ export default function QAPipeline() {
           requirements_file_content: fileContent
         })
       });
+
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({}));
+        addLog(`❌ Erro do Servidor (Status ${resp.status}): ${errData.error || 'Erro desconhecido'}`);
+        if (errData.traceback) {
+          addLog(`🔍 Diagnóstico da Exception:\n${errData.traceback}`);
+        }
+        setStatus("failed");
+        setLoading(false);
+        return;
+      }
+
       const data = await resp.json();
-      
       if (data.status === "success") {
         addLog(`✅ Tarefa de QA criada! ID: ${data.task_id}. Aguardando Agente Windows local...`);
         checkStatus(data.task_id);
       } else {
-        addLog("❌ Erro ao disparar robô de QA.");
+        addLog(`❌ Erro no retorno: ${JSON.stringify(data)}`);
         setStatus("failed");
         setLoading(false);
       }
-    } catch (err) {
-      addLog("❌ Falha de comunicação com o servidor.");
+    } catch (err: any) {
+      addLog(`❌ Falha de comunicação com o servidor: ${err.message || err}`);
       setStatus("failed");
       setLoading(false);
     }
