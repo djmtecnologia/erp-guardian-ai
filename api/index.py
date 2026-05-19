@@ -281,13 +281,20 @@ def get_ui_knowledge(db: Session = Depends(get_db)):
 @app.post("/api/qa/trigger")
 def trigger_qa_task(data: dict, db: Session = Depends(get_db)):
     """Dispara um cenário de teste a ser executado pelo Windows."""
+    
+    def clean_nul(val):
+        if isinstance(val, str):
+            # Remove qualquer caractere nulo (0x00) que o PostgreSQL rejeita
+            return val.replace("\x00", "").replace("\u0000", "")
+        return val
+
     task = QATask(
-        scenario=data.get("scenario"),
-        exe_path=data.get("exe_path"),
-        username=data.get("username"),
-        password=data.get("password"),
-        requirements_file_name=data.get("requirements_file_name"),
-        requirements_file_content=data.get("requirements_file_content"),
+        scenario=clean_nul(data.get("scenario")),
+        exe_path=clean_nul(data.get("exe_path")),
+        username=clean_nul(data.get("username")),
+        password=clean_nul(data.get("password")),
+        requirements_file_name=clean_nul(data.get("requirements_file_name")),
+        requirements_file_content=clean_nul(data.get("requirements_file_content")),
         status="pending"
     )
     db.add(task)
