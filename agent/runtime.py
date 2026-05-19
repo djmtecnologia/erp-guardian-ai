@@ -2,9 +2,55 @@ import time
 import os
 import sys
 import asyncio
+import traceback
+import logging
+
+# -----------------------------------------------------------------------
+# SISTEMA DE LOG PERSISTENTE EM ARQUIVO
+# Captura QUALQUER erro (mesmo antes da janela abrir completamente)
+# e salva no mesmo diretório do executável para análise posterior.
+# -----------------------------------------------------------------------
+
+# Descobre o diretório real do executável (funciona tanto .py quanto .exe)
+if getattr(sys, 'frozen', False):
+    # Rodando como executável PyInstaller
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    # Rodando como script Python normal
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+LOG_FILE = os.path.join(BASE_DIR, "erp_guardian_agent.log")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE, encoding="utf-8"),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger("ERPGuardian")
+
+def handle_exception(exc_type, exc_value, exc_tb):
+    """Captura exceções não tratadas e salva no log antes de fechar."""
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+        return
+    error_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    logger.critical(f"ERRO FATAL NÃO TRATADO:\n{error_msg}")
+
+sys.excepthook = handle_exception
+
+logger.info("=" * 60)
+logger.info("ERP Guardian AI - Iniciando...")
+logger.info(f"BASE_DIR do executável: {BASE_DIR}")
+logger.info(f"Arquivo de log: {LOG_FILE}")
+logger.info("=" * 60)
 
 # Adiciona a raiz do projeto ao sys.path para permitir importações modulares
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+logger.info("Importando módulos do agente...")
+
 import models
 
 from watchdog.observers import Observer
@@ -17,6 +63,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 API_KEY = os.getenv("GEMINI_API_KEY")
+
+# URL da Vercel como padrão — funciona sem .env na máquina da empresa
+# Pode ser sobrescrito via variável de ambiente LOCAL_BACKEND_URL no .env
+BACKEND_URL = os.getenv("BACKEND_URL", "https://erp-guardian-ai.vercel.app").rstrip("/")
+logger.info(f"Backend URL configurado: {BACKEND_URL}")
 
 import hashlib
 
@@ -75,7 +126,7 @@ class ERPFileHandler(FileSystemEventHandler):
             
             # Enviar para o Backend via Telemetria
             import requests
-            backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
+            backend_url = BACKEND_URL
             telemetry_data = {
                 "agent_id": "local-runtime-monitor",
                 "status": "completed",
@@ -88,9 +139,7 @@ class ERPFileHandler(FileSystemEventHandler):
             print(f"❌ Erro ao processar mudança: {e}")
 
 async def poll_ui_scan_tasks():
-    backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
-    # Remove barras invertidas ou normais ao final da URL
-    backend_url = backend_url.rstrip('/')
+    backend_url = BACKEND_URL
     
     from agent.ui_scanner import ERPUIWatcher
     watcher = ERPUIWatcher(backend_url)
@@ -118,8 +167,7 @@ async def poll_ui_scan_tasks():
         await asyncio.sleep(10)
 
 async def poll_qa_tasks():
-    backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
-    backend_url = backend_url.rstrip('/')
+    backend_url = BACKEND_URL
     
     from agent.qa_engine import QAAutomationEngine
     qa_engine = QAAutomationEngine(backend_url)
@@ -159,6 +207,7 @@ async def poll_qa_tasks():
 def sync_tnsnames():
     tnsnames_path = r"C:\app\client\oracle\product\19.0.0\client_1\network\admin\tnsnames.ora"
     tns_names = []
+    backend_url = BACKEND_URL
     if os.path.exists(tnsnames_path):
         try:
             import re
@@ -173,8 +222,6 @@ def sync_tnsnames():
         except Exception as e:
             print(f"[Monitor] Erro ao parsear tnsnames.ora: {e}")
             
-    backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
-    backend_url = backend_url.rstrip('/')
     try:
         import requests
         requests.post(f"{backend_url}/api/support/tnsnames", json={"tns_names": tns_names})
@@ -183,11 +230,9 @@ def sync_tnsnames():
         print(f"[Monitor] Erro ao sincronizar TNS com a nuvem: {e}")
 
 async def poll_support_tasks():
-    backend_url = os.getenv("BACKEND_URL", "http://localhost:8000")
-    backend_url = backend_url.rstrip('/')
+    backend_url = BACKEND_URL
     
     import requests
-    import os
     
     while True:
         try:
@@ -267,42 +312,66 @@ async def poll_support_tasks():
         await asyncio.sleep(10)
 
 def run_monitor():
-    path_to_watch = os.getenv("LOCAL_VCS_PATH", "./agent/samples")
-    
-    # Auto-cura: Cria a pasta se ela não existir física no diretório
-    os.makedirs(path_to_watch, exist_ok=True)
-    
-    # Sincroniza TNSnames local com a Vercel
-    sync_tnsnames()
-    
-    print(f"🛡️ ERP Guardian AI - Monitor Ativo")
-    print(f"👀 Vigiando diretório: {os.path.abspath(path_to_watch)}")
-    
-    loop = asyncio.new_event_loop()
-    
-    # Thread separada para o loop de eventos assíncronos
-    from threading import Thread
-    thread = Thread(target=loop.run_forever, daemon=True)
-    thread.start()
-
-    # Registra os ouvintes contínuos de tarefas da Vercel
-    asyncio.run_coroutine_threadsafe(poll_ui_scan_tasks(), loop)
-    asyncio.run_coroutine_threadsafe(poll_qa_tasks(), loop)
-    asyncio.run_coroutine_threadsafe(poll_support_tasks(), loop)
-
-    event_handler = ERPFileHandler(loop)
-    observer = Observer()
-    observer.schedule(event_handler, path_to_watch, recursive=True)
-    observer.start()
-
     try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        observer.stop()
-        loop.call_soon_threadsafe(loop.stop)
-    
-    observer.join()
+        # Resolve o diretório de samples SEMPRE relativo ao executável
+        # independentemente de onde o exe foi copiado ou executado
+        default_samples = os.path.join(BASE_DIR, "agent", "samples")
+        path_to_watch = os.getenv("LOCAL_VCS_PATH", default_samples)
+        
+        logger.info(f"Diretório de monitoramento configurado: {path_to_watch}")
+        
+        # Auto-cura: Garante que a pasta de monitoramento existe
+        os.makedirs(path_to_watch, exist_ok=True)
+        logger.info(f"✅ Pasta de monitoramento verificada/criada: {path_to_watch}")
+        
+        # Sincroniza TNSnames local com a Vercel
+        logger.info("Sincronizando perfis Oracle (tnsnames.ora)...")
+        sync_tnsnames()
+        
+        logger.info(f"🛡️ ERP Guardian AI - Monitor Ativo")
+        logger.info(f"👀 Vigiando diretório: {os.path.abspath(path_to_watch)}")
+        print(f"\n🛡️ ERP Guardian AI - Monitor Ativo")
+        print(f"👀 Vigiando diretório: {os.path.abspath(path_to_watch)}")
+        print(f"📋 Log salvo em: {LOG_FILE}\n")
+        
+        loop = asyncio.new_event_loop()
+        
+        # Thread separada para o loop de eventos assíncronos
+        from threading import Thread
+        thread = Thread(target=loop.run_forever, daemon=True)
+        thread.start()
+        logger.info("Loop de eventos assíncronos iniciado.")
+
+        # Registra os ouvintes contínuos de tarefas da Vercel
+        asyncio.run_coroutine_threadsafe(poll_ui_scan_tasks(), loop)
+        asyncio.run_coroutine_threadsafe(poll_qa_tasks(), loop)
+        asyncio.run_coroutine_threadsafe(poll_support_tasks(), loop)
+        logger.info("Polling de tarefas da nuvem ativado.")
+
+        event_handler = ERPFileHandler(loop)
+        observer = Observer()
+        observer.schedule(event_handler, path_to_watch, recursive=True)
+        observer.start()
+        logger.info("Watchdog de arquivos iniciado com sucesso!")
+
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("Encerrando por solicitação do usuário (KeyboardInterrupt)...")
+            observer.stop()
+            loop.call_soon_threadsafe(loop.stop)
+        
+        observer.join()
+        logger.info("ERP Guardian AI encerrado.")
+        
+    except Exception as e:
+        logger.critical(f"ERRO FATAL ao iniciar o monitor:\n{traceback.format_exc()}")
+        # Mantém a janela aberta por 30 segundos para o usuário ler o erro
+        print(f"\n\n❌ ERRO FATAL: {e}")
+        print(f"📋 Detalhes completos salvos em: {LOG_FILE}")
+        print("\nA janela fechará em 30 segundos...")
+        time.sleep(30)
 
 if __name__ == "__main__":
     run_monitor()

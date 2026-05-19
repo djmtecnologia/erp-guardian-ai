@@ -12,7 +12,7 @@ except ImportError:
     from models import ERPMapping
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(encoding='latin-1', override=False)
 
 class DocumentationAgent(BaseAgent):
     def __init__(self, api_key: str):
@@ -31,13 +31,21 @@ class DocumentationAgent(BaseAgent):
         self.findings = []
         
         db_url = os.getenv("DATABASE_URL")
-        self.engine = create_engine(db_url)
-        self.Session = sessionmaker(bind=self.engine)
+        if db_url:
+            self.engine = create_engine(db_url)
+            self.Session = sessionmaker(bind=self.engine)
+            self.db_available = True
+        else:
+            # Modo offline: sem banco de dados (execução local na empresa)
+            self.engine = None
+            self.Session = None
+            self.db_available = False
+            print("[DocumentationAgent] ⚠️ DATABASE_URL não configurada — operando em modo offline (sem persistência no Neon).")
 
     async def execute(self, context: Dict[str, Any]) -> AgentReport:
         self.status = AgentStatus.RUNNING
         project_path = context.get("project_path", "./agent/samples")
-        session = self.Session()
+        session = self.Session() if self.db_available else None
         
         try:
             target_extensions = ['.pas', '.dfm', '.sql']
@@ -46,14 +54,17 @@ class DocumentationAgent(BaseAgent):
                     if any(file.endswith(ext) for ext in target_extensions):
                         await self._process_with_fallback(os.path.join(root, file), session)
 
-            session.commit()
+            if session:
+                session.commit()
             self.status = AgentStatus.COMPLETED
         except Exception as e:
             print(f"[DocumentationAgent] Erro crítico: {e}")
-            session.rollback()
+            if session:
+                session.rollback()
             self.status = AgentStatus.FAILED
         finally:
-            session.close()
+            if session:
+                session.close()
 
         return self.generate_report()
 
@@ -79,19 +90,21 @@ class DocumentationAgent(BaseAgent):
             if not summary:
                 raise Exception("Todos os modelos de fallback falharam por cota.")
 
-            # Embeddings e Persistência
-            embedding_resp = genai.embed_content(model=self.embedding_model, content=summary, task_type="retrieval_document")
-            vector = embedding_resp['embedding']
+            # Persistência no Neon (apenas quando banco disponível)
+            if session:
+                embedding_resp = genai.embed_content(model=self.embedding_model, content=summary, task_type="retrieval_document")
+                vector = embedding_resp['embedding']
 
-            mapping = session.query(ERPMapping).filter_by(file_path=file_path).first()
-            if not mapping:
-                mapping = ERPMapping(file_path=file_path)
-                session.add(mapping)
-            
-            mapping.content_summary = summary
-            mapping.embedding = vector
-            mapping.module_name = os.path.basename(file_path)
-            self.findings.append({"file": file_path, "status": "persisted", "summary": summary})
+                mapping = session.query(ERPMapping).filter_by(file_path=file_path).first()
+                if not mapping:
+                    mapping = ERPMapping(file_path=file_path)
+                    session.add(mapping)
+                
+                mapping.content_summary = summary
+                mapping.embedding = vector
+                mapping.module_name = os.path.basename(file_path)
+
+            self.findings.append({"file": file_path, "status": "analyzed", "summary": summary})
 
         except Exception as e:
             print(f"[DocumentationAgent] Falha em {file_path}: {e}")

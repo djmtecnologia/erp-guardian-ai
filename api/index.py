@@ -23,6 +23,16 @@ SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# Auto-cria TODAS as tabelas no Neon na inicialização da API
+# Operação idempotente: ignora tabelas que já existem (checkfirst=True)
+@app.on_event("startup")
+def auto_create_tables():
+    try:
+        Base.metadata.create_all(bind=engine, checkfirst=True)
+        print("[Startup] ✅ Todas as tabelas verificadas/criadas no banco Neon.")
+    except Exception as e:
+        print(f"[Startup] ⚠️ Erro ao criar tabelas: {e}")
+
 def get_db():
     db = SessionLocal()
     try:

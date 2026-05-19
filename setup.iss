@@ -3,7 +3,7 @@
 
 [Setup]
 AppName=ERP Guardian Agent
-AppVersion=1.0.0
+AppVersion=1.2.0
 DefaultDirName={localappdata}\Programs\ERPGuardianAgent
 DefaultGroupName=ERP Guardian Agent
 OutputBaseFilename=ERPGuardianAgent_Setup
@@ -27,3 +27,41 @@ Name: "{userdesktop}\ERP Guardian Agent"; Filename: "{app}\ERPGuardianAgent.exe"
 [Run]
 ; Executa o Agente logo após a instalação terminar, sob o contexto do usuário comum
 Filename: "{app}\ERPGuardianAgent.exe"; Description: "Iniciar ERP Guardian Agent"; Flags: nowait postinstall skipifsilent
+
+[Code]
+procedure CreateEnvFileIfMissing();
+var
+  EnvPath: String;
+  EnvContent: TStringList;
+begin
+  EnvPath := ExpandConstant('{app}\.env');
+  if not FileExists(EnvPath) then
+  begin
+    EnvContent := TStringList.Create;
+    try
+      EnvContent.Add('# ERP Guardian AI - Configuracao do Agente Local');
+      EnvContent.Add('# Preencha as chaves abaixo para ativar os recursos de IA e nuvem.');
+      EnvContent.Add('');
+      EnvContent.Add('# Chave da API do Google Gemini (obrigatorio para analise de codigo)');
+      EnvContent.Add('GEMINI_API_KEY=');
+      EnvContent.Add('');
+      EnvContent.Add('# URL do backend na nuvem (padrao ja configurado para a Vercel)');
+      EnvContent.Add('BACKEND_URL=https://erp-guardian-ai.vercel.app');
+      EnvContent.Add('');
+      EnvContent.Add('# Caminho local do diretorio de VCS a monitorar (opcional)');
+      EnvContent.Add('# LOCAL_VCS_PATH=C:\ERP\Fontes');
+      EnvContent.SaveToFile(EnvPath);
+    finally
+      EnvContent.Free;
+    end;
+    MsgBox('Um arquivo .env foi criado em ' + EnvPath + #13#10 +
+           'Abra-o com o Bloco de Notas e preencha o campo GEMINI_API_KEY.', 
+           mbInformation, MB_OK);
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    CreateEnvFileIfMissing();
+end;
