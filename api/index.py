@@ -207,6 +207,9 @@ def get_pending_scan(db: Session = Depends(get_db)):
     task = db.query(ERPScanTask).filter_by(status="pending").first()
     if not task:
         return {"status": "no_tasks"}
+    # Marca como running para evitar que dois agentes peguem a mesma tarefa
+    task.status = "running"
+    db.commit()
     return {
         "status": "task_found",
         "task_id": task.id,
@@ -214,6 +217,14 @@ def get_pending_scan(db: Session = Depends(get_db)):
         "username": task.username,
         "password": task.password
     }
+
+@app.get("/api/ui-scan/status/{task_id}")
+def get_scan_status(task_id: int, db: Session = Depends(get_db)):
+    """Frontend consulta o status real de uma tarefa de varredura pelo ID."""
+    task = db.query(ERPScanTask).filter(ERPScanTask.id == task_id).first()
+    if task:
+        return {"status": task.status, "task_id": task.id}
+    return {"status": "not_found"}
 
 @app.post("/api/ui-scan/update")
 def update_scan_status(data: dict, db: Session = Depends(get_db)):

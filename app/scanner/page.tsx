@@ -30,10 +30,16 @@ export default function UIScanner() {
     return () => clearInterval(interval);
   }, []);
 
+  const [scanLog, setScanLog] = useState<string[]>([]);
+
+  const addLog = (msg: string) => setScanLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
+
   const handleStartScan = async (e) => {
     e.preventDefault();
     setLoading(true);
     setStatus("pending");
+    setScanLog([]);
+    addLog("⏳ Enviando tarefa para a fila da nuvem...");
 
     try {
       const resp = await fetch('/api/ui-scan/trigger', {
@@ -47,38 +53,55 @@ export default function UIScanner() {
       });
       const data = await resp.json();
       if (data.status === "success") {
-        // Iniciar polling de status
+        addLog(`✅ Tarefa criada! ID: ${data.task_id}. Aguardando o Agente Windows capturar...`);
         checkStatus(data.task_id);
       } else {
+        addLog(`❌ Erro ao criar tarefa: ${JSON.stringify(data)}`);
         setStatus("failed");
         setLoading(false);
       }
     } catch (err) {
+      addLog("❌ Erro de comunicação com o servidor.");
       setStatus("failed");
       setLoading(false);
     }
   };
 
   const checkStatus = async (taskId) => {
+    let previousStatus = "pending";
     const checkInterval = setInterval(async () => {
       try {
-        const resp = await fetch('/api/ui-scan/pending');
+        const resp = await fetch(`/api/ui-scan/status/${taskId}`);
         const data = await resp.json();
-        
-        // Se a tarefa não está mais pendente, verifica o status dela no banco
-        // Para simplificar, faremos uma requisição curta
-        if (data.status === "no_tasks") {
-          setStatus("completed");
-          setLoading(false);
-          clearInterval(checkInterval);
-          fetchKnowledge();
+        const currentStatus = data.status;
+
+        // Só loga quando o status muda
+        if (currentStatus !== previousStatus) {
+          previousStatus = currentStatus;
+          if (currentStatus === "running") {
+            addLog("🤖 Agente Windows capturou a tarefa! Executando pywinauto...");
+            setStatus("running");
+          } else if (currentStatus === "completed") {
+            addLog("🎉 Varredura concluída! Carregando telas mapeadas...");
+            setStatus("completed");
+            setLoading(false);
+            clearInterval(checkInterval);
+            fetchKnowledge();
+          } else if (currentStatus === "failed") {
+            addLog("❌ O Agente reportou falha na varredura. Verifique o log do executável.");
+            setStatus("failed");
+            setLoading(false);
+            clearInterval(checkInterval);
+          }
         }
       } catch (err) {
         clearInterval(checkInterval);
+        addLog("❌ Erro ao consultar status da tarefa.");
         setLoading(false);
       }
     }, 3000);
   };
+
 
   return (
     <div className="min-h-screen bg-[#0a0a0c] text-slate-200 p-8 font-sans">
@@ -158,6 +181,16 @@ export default function UIScanner() {
                 }`}>
                   {status}
                 </span>
+              </div>
+            )}
+
+            {/* Log de Execução em Tempo Real */}
+            {scanLog.length > 0 && (
+              <div className="mt-3 p-3 bg-black/40 border border-slate-800/60 rounded-xl max-h-40 overflow-y-auto">
+                <p className="text-[10px] text-slate-500 font-mono font-semibold mb-2 uppercase tracking-wider">Log de Execução</p>
+                {scanLog.map((line, i) => (
+                  <p key={i} className="text-[10px] text-slate-400 font-mono leading-5">{line}</p>
+                ))}
               </div>
             )}
           </form>
