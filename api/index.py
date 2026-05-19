@@ -30,8 +30,19 @@ def auto_create_tables():
     try:
         Base.metadata.create_all(bind=engine, checkfirst=True)
         print("[Startup] ✅ Todas as tabelas verificadas/criadas no banco Neon.")
+        
+        # Migração segura de colunas: garante que qa_tasks tenha as novas colunas
+        with engine.connect() as conn:
+            from sqlalchemy import text
+            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS exe_path TEXT;"))
+            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS username VARCHAR;"))
+            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS password VARCHAR;"))
+            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS requirements_file_name VARCHAR;"))
+            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS requirements_file_content TEXT;"))
+            conn.commit()
+            print("[Startup] 🧬 Migração de colunas adicionais para qa_tasks concluída com sucesso.")
     except Exception as e:
-        print(f"[Startup] ⚠️ Erro ao criar tabelas: {e}")
+        print(f"[Startup] ⚠️ Erro ao criar/atualizar tabelas: {e}")
 
 def get_db():
     db = SessionLocal()
