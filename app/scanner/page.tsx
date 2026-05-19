@@ -5,7 +5,7 @@ import { Eye, ShieldAlert, Cpu, CheckCircle2, ArrowLeft, Play, LayoutGrid } from
 import Link from 'next/link';
 
 export default function UIScanner() {
-  const [exePath, setExePath] = useState("C:\\ERP\\sistema.exe");
+  const [exePath, setExePath] = useState("C:\\COMPUSOFT\\PRINCIPAL\\PRINCIPAL.EXE");
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState("idle"); // idle, pending, running, completed, failed
@@ -163,6 +163,23 @@ export default function UIScanner() {
               <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
                 💡 <strong>Segurança do Navegador:</strong> O browser oculta a pasta por privacidade. Ao selecionar o arquivo, extraímos o nome exato (`${exePath.split('\\').pop()}`) mantendo a pasta anterior.
               </p>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                <span className="text-[9px] text-slate-500 self-center font-semibold uppercase tracking-wide mr-1">Sugestões:</span>
+                <button 
+                  type="button" 
+                  onClick={() => setExePath("C:\\COMPUSOFT\\PRINCIPAL\\PRINCIPAL.EXE")}
+                  className="text-[10px] bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded-lg px-2.5 py-1 text-slate-300 transition font-medium"
+                >
+                  Compusoft Principal
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => setExePath("C:\\ERP\\sistema.exe")}
+                  className="text-[10px] bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded-lg px-2.5 py-1 text-slate-300 transition font-medium"
+                >
+                  ERP Padrão
+                </button>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
