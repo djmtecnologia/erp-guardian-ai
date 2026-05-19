@@ -126,12 +126,43 @@ export default function UIScanner() {
           <form onSubmit={handleStartScan} className="space-y-4">
             <div>
               <label className="block text-xs text-slate-400 mb-1">Caminho do Executável (.exe local)</label>
-              <input 
-                type="text" 
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-300 focus:outline-none focus:border-emerald-500 transition"
-                value={exePath}
-                onChange={(e) => setExePath(e.target.value)}
-              />
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  className="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-300 focus:outline-none focus:border-emerald-500 transition"
+                  value={exePath}
+                  onChange={(e) => setExePath(e.target.value)}
+                  placeholder="C:\COMPUSOFT\PRINCIPAL\PRINCIPAL.EXE"
+                />
+                <input 
+                  type="file" 
+                  id="exe-picker-scanner"
+                  className="hidden"
+                  accept=".exe"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const name = file.name;
+                      setExePath((prev) => {
+                        const lastSlash = prev.lastIndexOf("\\");
+                        if (lastSlash !== -1) {
+                          return prev.substring(0, lastSlash + 1) + name;
+                        }
+                        return `C:\\COMPUSOFT\\PRINCIPAL\\` + name;
+                      });
+                    }
+                  }}
+                />
+                <label 
+                  htmlFor="exe-picker-scanner"
+                  className="bg-slate-950 border border-dashed border-slate-800 hover:border-emerald-500/50 cursor-pointer rounded-xl px-4 flex items-center justify-center text-xs text-slate-400 hover:text-slate-200 transition font-medium"
+                >
+                  Procurar...
+                </label>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                💡 <strong>Segurança do Navegador:</strong> O browser oculta a pasta por privacidade. Ao selecionar o arquivo, extraímos o nome exato (`${exePath.split('\\').pop()}`) mantendo a pasta anterior.
+              </p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
