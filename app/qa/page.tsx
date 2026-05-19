@@ -6,11 +6,18 @@ import Link from 'next/link';
 
 export default function QAPipeline() {
   const [scenario, setScenario] = useState("Testar rotina de faturamento de pedido com inserção automática de itens");
+  const [exePath, setExePath] = useState("C:\\ERP\\sistema.exe");
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("");
+  const [fileName, setFileName] = useState("");
+  const [fileContent, setFileContent] = useState("");
+  
   const [status, setStatus] = useState("idle"); // idle, pending, running, completed, failed
   const [loading, setLoading] = useState(false);
   const [reportsList, setReportsList] = useState([]);
   const [selectedReport, setSelectedReport] = useState(null);
   const [activeTab, setActiveTab] = useState("report"); // report, manual, logs
+  const [scanLog, setScanLog] = useState<string[]>([]);
 
   const fetchReports = async () => {
     try {
@@ -28,48 +35,90 @@ export default function QAPipeline() {
     return () => clearInterval(interval);
   }, []);
 
+  const addLog = (msg: string) => setScanLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setFileName(file.name);
+    addLog(`📎 Arquivo de requisitos selecionado: ${file.name}`);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      setFileContent(text);
+    };
+    reader.readAsText(file);
+  };
+
   const handleStartTest = async (e) => {
     e.preventDefault();
     if (!scenario) return;
 
     setLoading(true);
     setStatus("pending");
+    setScanLog([]);
+    addLog("⏳ Enviando cenário e credenciais de teste para a nuvem...");
 
     try {
       const resp = await fetch('/api/qa/trigger', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scenario })
+        body: JSON.stringify({
+          scenario,
+          exe_path: exePath,
+          username,
+          password,
+          requirements_file_name: fileName,
+          requirements_file_content: fileContent
+        })
       });
       const data = await resp.json();
       
       if (data.status === "success") {
+        addLog(`✅ Tarefa de QA criada! ID: ${data.task_id}. Aguardando Agente Windows local...`);
         checkStatus(data.task_id);
       } else {
+        addLog("❌ Erro ao disparar robô de QA.");
         setStatus("failed");
         setLoading(false);
       }
     } catch (err) {
+      addLog("❌ Falha de comunicação com o servidor.");
       setStatus("failed");
       setLoading(false);
     }
   };
 
   const checkStatus = (taskId) => {
+    let previousStatus = "pending";
     const checkInterval = setInterval(async () => {
       try {
-        const resp = await fetch('/api/qa/pending');
+        const resp = await fetch(`/api/qa/status/${taskId}`);
         const data = await resp.json();
+        const currentStatus = data.status;
         
-        // Se não há tarefas pendentes, o agente local já executou e concluiu o pipeline
-        if (data.status === "no_tasks") {
-          setStatus("completed");
-          setLoading(false);
-          clearInterval(checkInterval);
-          fetchReports();
+        if (currentStatus !== previousStatus) {
+          previousStatus = currentStatus;
+          if (currentStatus === "running") {
+            addLog("🤖 Agente Windows capturou a tarefa de QA! Inicializando FlaUI/pywinauto...");
+            setStatus("running");
+          } else if (currentStatus === "completed") {
+            addLog("🏆 Robô de QA concluiu com SUCESSO! IA gerando relatório e manual...");
+            setStatus("completed");
+            setLoading(false);
+            clearInterval(checkInterval);
+            fetchReports();
+          } else if (currentStatus === "failed") {
+            addLog("❌ O Robô de QA local reportou falha na automação de interface.");
+            setStatus("failed");
+            setLoading(false);
+            clearInterval(checkInterval);
+          }
         }
       } catch (err) {
         clearInterval(checkInterval);
+        addLog("❌ Erro ao verificar status do robô.");
         setLoading(false);
       }
     }, 3000);
@@ -97,13 +146,80 @@ export default function QAPipeline() {
           </h2>
           <form onSubmit={handleStartTest} className="space-y-4">
             <div>
+              <label className="block text-xs text-slate-400 mb-1">Caminho do Executável (.exe local)</label>
+              <input 
+                type="text" 
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-300 focus:outline-none focus:border-blue-500 transition"
+                value={exePath}
+                onChange={(e) => setExePath(e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Usuário ERP</label>
+                <input 
+                  type="text" 
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-300 focus:outline-none focus:border-blue-500 transition"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Senha ERP</label>
+                <input 
+                  type="password" 
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-300 focus:outline-none focus:border-blue-500 transition"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+            </div>
+            <div>
               <label className="block text-xs text-slate-400 mb-2">Descreva a funcionalidade que deseja testar no ERP</label>
               <textarea 
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-sm text-slate-300 focus:outline-none focus:border-blue-500 transition h-36 resize-none"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-sm text-slate-300 focus:outline-none focus:border-blue-500 transition h-32 resize-none"
                 value={scenario}
                 onChange={(e) => setScenario(e.target.value)}
                 placeholder="Ex: Abrir tela de faturamento, preencher cliente padrão, confirmar emissão da nota fiscal..."
               />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-2">Ou anexe um arquivo de requisitos (.txt, .pas, .sql, etc.)</label>
+              <div className="flex items-center gap-3">
+                <input 
+                  type="file" 
+                  id="requirements-file"
+                  className="hidden"
+                  onChange={handleFileChange}
+                  accept=".txt,.pas,.sql,.dfm,.json,.pdf,.doc,.docx"
+                />
+                <label 
+                  htmlFor="requirements-file"
+                  className="bg-slate-950 border border-dashed border-slate-800 hover:border-blue-500/50 cursor-pointer rounded-xl p-3 text-xs text-slate-400 hover:text-slate-200 transition flex items-center gap-2 flex-1 justify-center"
+                >
+                  <FileText size={16} className="text-blue-400" />
+                  {fileName ? "Alterar Arquivo" : "Selecionar Arquivo de Requisitos"}
+                </label>
+                {fileName && (
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setFileName("");
+                      setFileContent("");
+                      addLog("🗑️ Arquivo de requisitos removido.");
+                    }}
+                    className="p-3 bg-red-950/20 hover:bg-red-950/40 border border-red-900/40 hover:border-red-900 rounded-xl text-xs text-red-400 transition"
+                  >
+                    Remover
+                  </button>
+                )}
+              </div>
+              {fileName && (
+                <div className="mt-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg text-[10px] text-blue-400 flex items-center justify-between">
+                  <span>📎 Anexado: <strong>{fileName}</strong></span>
+                  <span>{fileContent.length} caracteres lidos</span>
+                </div>
+              )}
             </div>
 
             <button 
@@ -125,7 +241,7 @@ export default function QAPipeline() {
 
             {status !== "idle" && (
               <div className="mt-4 p-3 bg-slate-950/60 border border-slate-800 rounded-xl text-xs flex items-center justify-between">
-                <span className="text-slate-400 font-medium">Status do Fluxo:</span>
+                <span className="text-slate-400 font-medium">Status do Robô:</span>
                 <span className={`px-2 py-1 rounded font-semibold uppercase ${
                   status === "completed" ? "bg-emerald-500/10 text-emerald-400" :
                   status === "failed" ? "bg-red-500/10 text-red-400" :
@@ -133,6 +249,16 @@ export default function QAPipeline() {
                 }`}>
                   {status}
                 </span>
+              </div>
+            )}
+
+            {/* Log de Progresso em Tempo Real */}
+            {scanLog.length > 0 && (
+              <div className="mt-3 p-3 bg-black/40 border border-slate-800/60 rounded-xl max-h-40 overflow-y-auto">
+                <p className="text-[10px] text-slate-500 font-mono font-semibold mb-2 uppercase tracking-wider">Log de Execução</p>
+                {scanLog.map((line, i) => (
+                  <p key={i} className="text-[10px] text-slate-400 font-mono leading-5">{line}</p>
+                ))}
               </div>
             )}
           </form>

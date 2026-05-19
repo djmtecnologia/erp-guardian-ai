@@ -77,6 +77,11 @@ class QATask(Base):
 
     id = Column(Integer, primary_key=True)
     scenario = Column(Text, nullable=False)  # Descrição do cenário a ser testado
+    exe_path = Column(Text, nullable=True)
+    username = Column(String, nullable=True)
+    password = Column(String, nullable=True)
+    requirements_file_name = Column(String, nullable=True)
+    requirements_file_content = Column(Text, nullable=True)
     status = Column(String, default="pending")  # pending, running, completed, failed
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

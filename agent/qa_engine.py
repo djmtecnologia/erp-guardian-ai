@@ -22,9 +22,11 @@ class QAAutomationEngine:
         print(log_entry)
         self.logs.append(log_entry)
 
-    def execute_qa_test(self, task_id: int, scenario: str, exe_path: str = "C:\\ERP\\sistema.exe"):
+    def execute_qa_test(self, task_id: int, scenario: str, exe_path: str = "C:\\ERP\\sistema.exe", username: str = "admin", password: str = "", requirements_text: str = None):
         """Executa testes de caixa-preta de UI simulando o FlaUI no ERP."""
         self.log(f"🎬 Iniciando Execução de QA para o Cenário: '{scenario}'")
+        if requirements_text:
+            self.log(f"📄 Requisitos adicionais carregados: {len(requirements_text)} caracteres.")
         
         if not PYWINAUTO_AVAILABLE:
             self.log("❌ Falha: Automação necessita de sistema operacional Windows.")
@@ -46,19 +48,19 @@ class QAAutomationEngine:
             edits = [c for c in descendants if "Edit" in c.friendly_class_name() or "TEdit" in c.class_name()]
             
             if len(edits) >= 2:
-                self.log("Passo 4: Preenchendo credenciais automatizadas de QA...")
+                self.log(f"Passo 4: Preenchendo credenciais do ERP para o usuário '{username}'...")
                 try:
-                    edits[0].set_text("qa_automator")
+                    edits[0].set_text(username)
                 except Exception:
                     try:
-                        edits[0].type_keys("qa_automator")
+                        edits[0].type_keys(username)
                     except Exception:
                         pass
                 try:
-                    edits[1].set_text("super_senha_qa_123")
+                    edits[1].set_text(password)
                 except Exception:
                     try:
-                        edits[1].type_keys("super_senha_qa_123")
+                        edits[1].type_keys(password)
                     except Exception:
                         pass
                 self.log("Credenciais de teste inseridas com sucesso.")

@@ -181,13 +181,21 @@ async def poll_qa_tasks():
             if data.get("status") == "task_found":
                 task_id = data.get("task_id")
                 scenario = data.get("scenario")
+                exe_path = data.get("exe_path") or "C:\\ERP\\sistema.exe"
+                username = data.get("username") or "admin"
+                password = data.get("password") or ""
+                req_content = data.get("requirements_file_content")
                 
-                print(f"\n[Monitor] 📥 Nova tarefa de QA detectada! ID: {task_id} - Cenário: {scenario}")
+                full_scenario = scenario
+                if req_content:
+                    full_scenario = f"{scenario}\n\n[Requisitos do Arquivo Anexo]:\n{req_content}"
+                
+                print(f"\n[Monitor] 📥 Nova tarefa de QA detectada! ID: {task_id} - Executável: {exe_path}")
                 
                 # Executa o fluxo de testes simulado (FlaUI/pywinauto)
                 logs = await asyncio.to_thread(
                     qa_engine.execute_qa_test,
-                    task_id, scenario
+                    task_id, full_scenario, exe_path, username, password, req_content
                 )
                 
                 # Envia o log gerado de volta para a nuvem processar a documentação

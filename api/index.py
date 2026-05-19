@@ -259,6 +259,11 @@ def trigger_qa_task(data: dict, db: Session = Depends(get_db)):
     """Dispara um cenário de teste a ser executado pelo Windows."""
     task = QATask(
         scenario=data.get("scenario"),
+        exe_path=data.get("exe_path"),
+        username=data.get("username"),
+        password=data.get("password"),
+        requirements_file_name=data.get("requirements_file_name"),
+        requirements_file_content=data.get("requirements_file_content"),
         status="pending"
     )
     db.add(task)
@@ -272,11 +277,26 @@ def get_pending_qa_task(db: Session = Depends(get_db)):
     task = db.query(QATask).filter_by(status="pending").first()
     if not task:
         return {"status": "no_tasks"}
+    task.status = "running"
+    db.commit()
     return {
         "status": "task_found",
         "task_id": task.id,
-        "scenario": task.scenario
+        "scenario": task.scenario,
+        "exe_path": task.exe_path,
+        "username": task.username,
+        "password": task.password,
+        "requirements_file_name": task.requirements_file_name,
+        "requirements_file_content": task.requirements_file_content
     }
+
+@app.get("/api/qa/status/{task_id}")
+def get_qa_status(task_id: int, db: Session = Depends(get_db)):
+    """Frontend consulta o status real de uma tarefa de QA pelo ID."""
+    task = db.query(QATask).filter(QATask.id == task_id).first()
+    if task:
+        return {"status": task.status, "task_id": task.id}
+    return {"status": "not_found"}
 
 @app.post("/api/qa/update")
 def update_qa_status(data: dict, db: Session = Depends(get_db)):
