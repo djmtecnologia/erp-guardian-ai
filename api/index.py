@@ -256,12 +256,26 @@ def trigger_scan(data: dict, db: Session = Depends(get_db)):
         gef_empresa=data.get("gef_empresa"),
         gef_filial=data.get("gef_filial"),
         source_code=data.get("source_code"),
-        status="pending"
+        status=data.get("status") or "pending"
     )
     db.add(task)
     db.commit()
     db.refresh(task)
     return {"status": "success", "task_id": task.id}
+
+@app.post("/api/ui-scan/append-code")
+def append_scan_code(data: dict, db: Session = Depends(get_db)):
+    task_id = data.get("task_id")
+    chunk = data.get("chunk") or ""
+    task = db.query(ERPScanTask).filter_by(id=task_id).first()
+    if task:
+        if task.source_code is None:
+            task.source_code = chunk
+        else:
+            task.source_code += chunk
+        db.commit()
+        return {"status": "success"}
+    return {"status": "error", "message": "Tarefa de varredura não encontrada."}
 
 @app.get("/api/ui-scan/pending")
 def get_pending_scan(db: Session = Depends(get_db)):
@@ -395,12 +409,33 @@ def trigger_qa_task(data: dict, db: Session = Depends(get_db)):
         db_tns=clean_nul(data.get("db_tns")),
         db_user=clean_nul(data.get("db_user")),
         db_password=clean_nul(data.get("db_password")),
-        status="pending"
+        status=clean_nul(data.get("status")) or "pending"
     )
     db.add(task)
     db.commit()
     db.refresh(task)
     return {"status": "success", "task_id": task.id}
+
+@app.post("/api/qa/append-code")
+def append_qa_code(data: dict, db: Session = Depends(get_db)):
+    task_id = data.get("task_id")
+    chunk = data.get("chunk") or ""
+    
+    def clean_nul(val):
+        if isinstance(val, str):
+            return val.replace("\x00", "").replace("\u0000", "")
+        return val
+
+    chunk = clean_nul(chunk)
+    task = db.query(QATask).filter_by(id=task_id).first()
+    if task:
+        if task.requirements_file_content is None:
+            task.requirements_file_content = chunk
+        else:
+            task.requirements_file_content += chunk
+        db.commit()
+        return {"status": "success"}
+    return {"status": "error", "message": "Tarefa de QA não encontrada."}
 
 @app.get("/api/qa/pending")
 def get_pending_qa_task(db: Session = Depends(get_db)):

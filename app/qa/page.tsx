@@ -3,6 +3,11 @@
 import React, { useState, useEffect } from 'react';
 import { Eye, ShieldAlert, Cpu, CheckCircle2, ArrowLeft, Play, LayoutGrid, FileText, ClipboardList, BookOpen } from 'lucide-react';
 import Link from 'next/link';
+import JSZip from 'jszip';
+
+const sanitizeDfm = (content: string): string => {
+  return content.replace(/\{\s*[0-9a-fA-F\s\r\n\+\-\=\/\\]+\}/g, '{ [Dados Binários Omitidos para Otimização] }');
+};
 
 export default function QAPipeline() {
   const [scenario, setScenario] = useState("Testar rotina de faturamento de pedido com inserção automática de itens");
@@ -72,18 +77,97 @@ export default function QAPipeline() {
 
   const addLog = (msg: string) => setScanLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setFileName(file.name);
-    addLog(`📎 Arquivo de requisitos selecionado: ${file.name}`);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target?.result as string;
-      setFileContent(text);
-    };
-    reader.readAsText(file);
+    if (file.name.toLowerCase().endsWith('.zip')) {
+      addLog(`⚙️ Processando arquivo ZIP de requisitos: ${file.name}`);
+      try {
+        const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve(ev.target?.result as ArrayBuffer);
+          reader.onerror = (err) => reject(err);
+          reader.readAsArrayBuffer(file);
+        });
+        
+        const zip = new JSZip();
+        const zipContent = await zip.loadAsync(arrayBuffer);
+        let extractedText = "";
+        let count = 0;
+        
+        for (const [relativePath, fileEntry] of Object.entries(zipContent.files)) {
+          if (!fileEntry.dir && (
+            relativePath.toLowerCase().endsWith('.pas') || 
+            relativePath.toLowerCase().endsWith('.dfm') || 
+            relativePath.toLowerCase().endsWith('.sql') || 
+            relativePath.toLowerCase().endsWith('.txt') ||
+            relativePath.toLowerCase().endsWith('.json') ||
+            relativePath.toLowerCase().endsWith('.md')
+          )) {
+            const text = await fileEntry.async('string');
+            let processedText = text;
+            if (relativePath.toLowerCase().endsWith('.dfm')) {
+              processedText = sanitizeDfm(text);
+            }
+            extractedText += `\n--- ARQUIVO (ZIP): ${relativePath} ---\n${processedText}\n`;
+            count++;
+          }
+        }
+        
+        setFileName(`${file.name} (${count} arquivos extraídos)`);
+        setFileContent(extractedText);
+        addLog(`✅ ZIP descompactado! ${count} arquivos de requisitos importados.`);
+      } catch (err: any) {
+        alert(`Erro ao processar o ZIP de requisitos: ${err.message || err}`);
+      }
+    } else {
+      setFileName(file.name);
+      addLog(`📎 Arquivo de requisitos selecionado: ${file.name}`);
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        let text = event.target?.result as string;
+        if (file.name.toLowerCase().endsWith('.dfm')) {
+          text = sanitizeDfm(text);
+        }
+        setFileContent(text);
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  const uploadInChunks = async (taskId: number, code: string, addLogFn: (msg: string) => void) => {
+    const CHUNK_SIZE = 1024 * 1024; // 1 MB chunks
+    const totalLength = code.length;
+    let offset = 0;
+    let chunkIndex = 1;
+    const totalChunks = Math.ceil(totalLength / CHUNK_SIZE);
+    
+    while (offset < totalLength) {
+      const chunk = code.substring(offset, offset + CHUNK_SIZE);
+      addLogFn(`⏳ Enviando bloco ${chunkIndex}/${totalChunks} do código-fonte (${(chunk.length / 1024).toFixed(1)} KB)...`);
+      
+      const response = await fetch('/api/qa/append-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: taskId,
+          chunk: chunk
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Falha ao enviar bloco ${chunkIndex}`);
+      }
+      
+      const resData = await response.json();
+      if (resData.status !== 'success') {
+        throw new Error(resData.message || `Falha ao salvar bloco ${chunkIndex}`);
+      }
+      
+      offset += CHUNK_SIZE;
+      chunkIndex++;
+    }
   };
 
   const handleStartTest = async (e) => {
@@ -93,6 +177,12 @@ export default function QAPipeline() {
     setLoading(true);
     setStatus("pending");
     setScanLog([]);
+    
+    const finalContent = delphiSourceCode 
+      ? `[REQUISITOS / REGRAS DE NEGÓCIO]:\n${fileContent || 'Regras fornecidas no Cenário Principal.'}\n\n[CÓDIGO FONTE DELPHI PASCAL DO SISTEMA]:\n${delphiSourceCode}`
+      : fileContent;
+      
+    const hasSource = !!finalContent;
     addLog("⏳ Enviando cenário e credenciais de teste para a nuvem...");
 
     try {
@@ -105,9 +195,7 @@ export default function QAPipeline() {
           username,
           password,
           requirements_file_name: fileName || (delphiFileName ? "Delphi_Unit_Cross_Audit" : ""),
-          requirements_file_content: delphiSourceCode 
-            ? `[REQUISITOS / REGRAS DE NEGÓCIO]:\n${fileContent || 'Regras fornecidas no Cenário Principal.'}\n\n[CÓDIGO FONTE DELPHI PASCAL DO SISTEMA]:\n${delphiSourceCode}`
-            : fileContent,
+          requirements_file_content: "", // Não envia no trigger inicial
           db_object_name: enableDbAudit ? dbObjectName : "",
           db_tns: enableDbAudit ? dbTns : "",
           db_user: enableDbAudit ? dbUser : "",
@@ -115,7 +203,8 @@ export default function QAPipeline() {
           exe_version: enableGef ? exeVersion : "",
           gef_grupo: enableGef ? gefGrupo : "",
           gef_empresa: enableGef ? gefEmpresa : "",
-          gef_filial: enableGef ? gefFilial : ""
+          gef_filial: enableGef ? gefFilial : "",
+          status: hasSource ? "uploading" : "pending"
         })
       });
 
@@ -132,8 +221,43 @@ export default function QAPipeline() {
 
       const data = await resp.json();
       if (data.status === "success") {
-        addLog(`✅ Tarefa de QA criada! ID: ${data.task_id}. Aguardando Agente Windows local...`);
-        checkStatus(data.task_id);
+        const taskId = data.task_id;
+        
+        if (hasSource) {
+          addLog(`📦 Tarefa #${taskId} criada na nuvem. Enviando anexos e fontes Delphi em blocos...`);
+          try {
+            await uploadInChunks(taskId, finalContent, addLog);
+            addLog("✅ Todos os blocos do conteúdo/fontes foram enviados!");
+            
+            // Ativa a tarefa mudando o status para "pending"
+            addLog("🚀 Ativando tarefa de QA para o Agente Windows local...");
+            const activationResp = await fetch('/api/qa/update', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                task_id: taskId,
+                status: 'pending'
+              })
+            });
+            if (!activationResp.ok) {
+              throw new Error("Falha ao ativar tarefa após upload em blocos.");
+            }
+          } catch (uploadErr: any) {
+            addLog(`❌ Erro no upload em blocos: ${uploadErr.message || uploadErr}`);
+            // Reporta falha no status para o agente
+            await fetch('/api/qa/update', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ task_id: taskId, status: 'failed' })
+            }).catch(() => {});
+            setStatus("failed");
+            setLoading(false);
+            return;
+          }
+        }
+        
+        addLog(`✅ Tarefa de QA criada! ID: ${taskId}. Aguardando Agente Windows local...`);
+        checkStatus(taskId);
       } else {
         addLog(`❌ Erro no retorno: ${JSON.stringify(data)}`);
         setStatus("failed");
@@ -300,20 +424,68 @@ export default function QAPipeline() {
                   type="file" 
                   id="delphi-file"
                   className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      setDelphiFileName(file.name);
-                      const reader = new FileReader();
-                      reader.onload = (ev) => {
-                        if (ev.target?.result) {
-                          setDelphiSourceCode(ev.target.result as string);
+                  multiple
+                  onChange={async (e) => {
+                    const files = e.target.files;
+                    if (!files || files.length === 0) return;
+                    
+                    let compiledCode = "";
+                    let fileCount = 0;
+                    
+                    for (let i = 0; i < files.length; i++) {
+                      const file = files[i];
+                      
+                      if (file.name.toLowerCase().endsWith('.zip')) {
+                        try {
+                          const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+                            const reader = new FileReader();
+                            reader.onload = (ev) => resolve(ev.target?.result as ArrayBuffer);
+                            reader.onerror = (err) => reject(err);
+                            reader.readAsArrayBuffer(file);
+                          });
+                          
+                          const zip = new JSZip();
+                          const zipContent = await zip.loadAsync(arrayBuffer);
+                          
+                          for (const [relativePath, fileEntry] of Object.entries(zipContent.files)) {
+                            if (!fileEntry.dir && (
+                              relativePath.toLowerCase().endsWith('.pas') || 
+                              relativePath.toLowerCase().endsWith('.dfm') || 
+                              relativePath.toLowerCase().endsWith('.sql') || 
+                              relativePath.toLowerCase().endsWith('.txt') ||
+                              relativePath.toLowerCase().endsWith('.json')
+                            )) {
+                              const text = await fileEntry.async('string');
+                              let processedText = text;
+                              if (relativePath.toLowerCase().endsWith('.dfm')) {
+                                processedText = sanitizeDfm(text);
+                              }
+                              compiledCode += `\n--- FONTE DELPHI (ZIP): ${relativePath} ---\n${processedText}\n`;
+                              fileCount++;
+                            }
+                          }
+                        } catch (zipErr: any) {
+                          alert(`Erro ao ler o ZIP "${file.name}": ${zipErr.message || zipErr}`);
                         }
-                      };
-                      reader.readAsText(file);
+                      } else {
+                        const text = await new Promise<string>((resolve) => {
+                          const reader = new FileReader();
+                          reader.onload = (ev) => resolve(ev.target?.result as string || "");
+                          reader.readAsText(file);
+                        });
+                        let processedText = text;
+                        if (file.name.toLowerCase().endsWith('.dfm')) {
+                          processedText = sanitizeDfm(text);
+                        }
+                        compiledCode += `\n--- FONTE DELPHI: ${file.name} ---\n${processedText}\n`;
+                        fileCount++;
+                      }
                     }
+                    
+                    setDelphiFileName(`${fileCount} arquivo(s) Delphi processado(s)`);
+                    setDelphiSourceCode(compiledCode);
                   }}
-                  accept=".pas,.dfm,.pascal,.txt"
+                  accept=".pas,.dfm,.pascal,.txt,.zip"
                 />
                 <label 
                   htmlFor="delphi-file"

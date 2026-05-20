@@ -3,6 +3,11 @@
 import React, { useState, useEffect } from 'react';
 import { Eye, ShieldAlert, Cpu, CheckCircle2, ArrowLeft, Play, LayoutGrid } from 'lucide-react';
 import Link from 'next/link';
+import JSZip from 'jszip';
+
+const sanitizeDfm = (content: string): string => {
+  return content.replace(/\{\s*[0-9a-fA-F\s\r\n\+\-\=\/\\]+\}/g, '{ [Dados Binários Omitidos para Otimização] }');
+};
 
 export default function UIScanner() {
   const [exePath, setExePath] = useState("C:\\COMPUSOFT\\PRINCIPAL\\PRINCIPAL.EXE");
@@ -46,11 +51,47 @@ export default function UIScanner() {
 
   const addLog = (msg: string) => setScanLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
 
+  const uploadInChunks = async (taskId: number, code: string, addLogFn: (msg: string) => void) => {
+    const CHUNK_SIZE = 1024 * 1024; // 1 MB chunks
+    const totalLength = code.length;
+    let offset = 0;
+    let chunkIndex = 1;
+    const totalChunks = Math.ceil(totalLength / CHUNK_SIZE);
+    
+    while (offset < totalLength) {
+      const chunk = code.substring(offset, offset + CHUNK_SIZE);
+      addLogFn(`⏳ Enviando bloco ${chunkIndex}/${totalChunks} do código-fonte (${(chunk.length / 1024).toFixed(1)} KB)...`);
+      
+      const response = await fetch('/api/ui-scan/append-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: taskId,
+          chunk: chunk
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Falha ao enviar bloco ${chunkIndex}`);
+      }
+      
+      const resData = await response.json();
+      if (resData.status !== 'success') {
+        throw new Error(resData.message || `Falha ao salvar bloco ${chunkIndex}`);
+      }
+      
+      offset += CHUNK_SIZE;
+      chunkIndex++;
+    }
+  };
+
   const handleStartScan = async (e) => {
     e.preventDefault();
     setLoading(true);
     setStatus("pending");
     setScanLog([]);
+    
+    const hasSource = !!sourceCode;
     addLog("⏳ Enviando tarefa para a fila da nuvem...");
 
     try {
@@ -65,20 +106,61 @@ export default function UIScanner() {
           gef_grupo: enableGef ? gefGrupo : "",
           gef_empresa: enableGef ? gefEmpresa : "",
           gef_filial: enableGef ? gefFilial : "",
-          source_code: sourceCode
+          source_code: "", // Não envia o código no post inicial para evitar 413
+          status: hasSource ? "uploading" : "pending"
         })
       });
+      
+      if (!resp.ok) {
+        throw new Error(`Erro do Servidor (Status ${resp.status})`);
+      }
+      
       const data = await resp.json();
       if (data.status === "success") {
-        addLog(`✅ Tarefa criada! ID: ${data.task_id}. Aguardando o Agente Windows capturar...`);
-        checkStatus(data.task_id);
+        const taskId = data.task_id;
+        
+        if (hasSource) {
+          addLog(`📦 Tarefa #${taskId} criada na nuvem. Enviando arquivos Delphi em blocos...`);
+          try {
+            await uploadInChunks(taskId, sourceCode, addLog);
+            addLog("✅ Todos os blocos do código-fonte foram enviados!");
+            
+            // Ativa a tarefa mudando o status para "pending"
+            addLog("🚀 Ativando tarefa para o Agente Windows local...");
+            const activationResp = await fetch('/api/ui-scan/update', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                task_id: taskId,
+                status: 'pending'
+              })
+            });
+            if (!activationResp.ok) {
+              throw new Error("Falha ao ativar tarefa após upload em blocos.");
+            }
+          } catch (uploadErr: any) {
+            addLog(`❌ Erro no upload em blocos: ${uploadErr.message || uploadErr}`);
+            // Reporta falha no status para o agente
+            await fetch('/api/ui-scan/update', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ task_id: taskId, status: 'failed' })
+            }).catch(() => {});
+            setStatus("failed");
+            setLoading(false);
+            return;
+          }
+        }
+        
+        addLog(`✅ Sonda ativada! ID: ${taskId}. Aguardando o Agente Windows capturar...`);
+        checkStatus(taskId);
       } else {
         addLog(`❌ Erro ao criar tarefa: ${JSON.stringify(data)}`);
         setStatus("failed");
         setLoading(false);
       }
-    } catch (err) {
-      addLog("❌ Erro de comunicação com o servidor.");
+    } catch (err: any) {
+      addLog(`❌ Erro de comunicação com o servidor: ${err.message || err}`);
       setStatus("failed");
       setLoading(false);
     }
@@ -306,16 +388,60 @@ export default function UIScanner() {
                     const files = e.target.files;
                     if (files && files.length > 0) {
                       let compiledCode = "";
+                      let fileCount = 0;
+                      
                       for (let i = 0; i < files.length; i++) {
                         const file = files[i];
-                        const content = await new Promise<string>((resolve) => {
-                          const reader = new FileReader();
-                          reader.onload = (ev) => resolve(ev.target?.result as string || "");
-                          reader.readAsText(file);
-                        });
-                        compiledCode += `\n--- ARQUIVO FONTE: ${file.name} ---\n${content}\n`;
+                        
+                        if (file.name.toLowerCase().endsWith('.zip')) {
+                          try {
+                            const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+                              const reader = new FileReader();
+                              reader.onload = (ev) => resolve(ev.target?.result as ArrayBuffer);
+                              reader.onerror = (err) => reject(err);
+                              reader.readAsArrayBuffer(file);
+                            });
+                            
+                            const zip = new JSZip();
+                            const zipContent = await zip.loadAsync(arrayBuffer);
+                            
+                            for (const [relativePath, fileEntry] of Object.entries(zipContent.files)) {
+                              if (!fileEntry.dir && (
+                                relativePath.toLowerCase().endsWith('.pas') || 
+                                relativePath.toLowerCase().endsWith('.dfm') || 
+                                relativePath.toLowerCase().endsWith('.sql') || 
+                                relativePath.toLowerCase().endsWith('.txt') ||
+                                relativePath.toLowerCase().endsWith('.json')
+                              )) {
+                                const text = await fileEntry.async('string');
+                                let processedText = text;
+                                if (relativePath.toLowerCase().endsWith('.dfm')) {
+                                  processedText = sanitizeDfm(text);
+                                }
+                                compiledCode += `\n--- ARQUIVO FONTE (ZIP): ${relativePath} ---\n${processedText}\n`;
+                                fileCount++;
+                              }
+                            }
+                          } catch (zipErr: any) {
+                            alert(`Erro ao ler o arquivo ZIP "${file.name}": ${zipErr.message || zipErr}`);
+                          }
+                        } else {
+                          const content = await new Promise<string>((resolve) => {
+                            const reader = new FileReader();
+                            reader.onload = (ev) => resolve(ev.target?.result as string || "");
+                            reader.readAsText(file);
+                          });
+                          
+                          let processedContent = content;
+                          if (file.name.toLowerCase().endsWith('.dfm')) {
+                            processedContent = sanitizeDfm(content);
+                          }
+                          compiledCode += `\n--- ARQUIVO FONTE: ${file.name} ---\n${processedContent}\n`;
+                          fileCount++;
+                        }
                       }
-                      setSourceFilesName(`${files.length} arquivos selecionados`);
+                      
+                      setSourceFilesName(`${fileCount} arquivos processados`);
                       setSourceCode(compiledCode);
                     }
                   }}
