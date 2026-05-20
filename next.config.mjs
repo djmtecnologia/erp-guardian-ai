@@ -10,12 +10,14 @@ const nextConfig = {
   },
   // Configuração para permitir que as funções Python na pasta api/ funcionem localmente se necessário
   async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: '/api/:path*',
-      },
-    ];
+    return process.env.NODE_ENV === 'development'
+      ? [
+          {
+            source: '/api/:path*',
+            destination: 'http://127.0.0.1:8000/api/:path*',
+          },
+        ]
+      : [];
   },
 };
 
