@@ -193,9 +193,10 @@ class ERPUIWatcher:
                 except Exception:
                     continue
 
-            # 5. Enviar árvore de controle para a base de conhecimento na nuvem
+            # 5. Enviar árvore de controle para a base de conhecimento na nuvem com o respectivo ID da tarefa
             print("[UI-Scanner] Enviando árvore de interface mapeada para a Vercel...")
             payload = {
+                "task_id": task_id,
                 "screen_name": screen_title or "ERP Main Window",
                 "controls": ui_tree
             }

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from typing import List
 import os
 import sys
+import base64
 
 # Adiciona o caminho para encontrar os modelos na raiz se necessário
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

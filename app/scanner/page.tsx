@@ -281,6 +281,7 @@ export default function UIScanner() {
                         onChange={(e) => setGefFilial(e.target.value)}
                       />
                     </div>
+                  </div>
                 </div>
               )}
             </div>

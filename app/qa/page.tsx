@@ -285,7 +285,8 @@ export default function QAPipeline() {
                 value={scenario}
                 onChange={(e) => setScenario(e.target.value)}
                 placeholder="Ex: Abrir tela de faturamento, preencher cliente padrão, confirmar emissão da nota fiscal..."
-             </div>
+              />
+            </div>
 
             {/* Seção Premium de Inserção de Código-Fonte Delphi Pascal */}
             <div className="bg-slate-950/40 border border-slate-800/60 rounded-xl p-4 space-y-3">
