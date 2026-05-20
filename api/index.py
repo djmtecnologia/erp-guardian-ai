@@ -44,16 +44,37 @@ def auto_create_tables():
         Base.metadata.create_all(bind=engine, checkfirst=True)
         print("[Startup] ✅ Todas as tabelas verificadas/criadas no banco Neon.")
         
-        # Migração segura de colunas: garante que qa_tasks tenha as novas colunas
+        # Migração segura de colunas: garante que qa_tasks e erp_scan_tasks tenham as novas colunas
         with engine.connect() as conn:
             from sqlalchemy import text
+            # qa_tasks
             conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS exe_path TEXT;"))
             conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS username VARCHAR;"))
             conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS password VARCHAR;"))
             conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS requirements_file_name VARCHAR;"))
             conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS requirements_file_content TEXT;"))
+            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS db_object_name VARCHAR;"))
+            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS db_tns VARCHAR;"))
+            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS db_user VARCHAR;"))
+            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS db_password VARCHAR;"))
+            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS exe_version VARCHAR;"))
+            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS gef_grupo VARCHAR;"))
+            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS gef_empresa VARCHAR;"))
+            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS gef_filial VARCHAR;"))
+            
+            # erp_scan_tasks
+            conn.execute(text("ALTER TABLE erp_scan_tasks ADD COLUMN IF NOT EXISTS exe_version VARCHAR;"))
+            conn.execute(text("ALTER TABLE erp_scan_tasks ADD COLUMN IF NOT EXISTS gef_grupo VARCHAR;"))
+            conn.execute(text("ALTER TABLE erp_scan_tasks ADD COLUMN IF NOT EXISTS gef_empresa VARCHAR;"))
+            conn.execute(text("ALTER TABLE erp_scan_tasks ADD COLUMN IF NOT EXISTS gef_filial VARCHAR;"))
+            conn.execute(text("ALTER TABLE erp_scan_tasks ADD COLUMN IF NOT EXISTS source_code TEXT;"))
+            
+            # erp_ui_knowledge
+            conn.execute(text("ALTER TABLE erp_ui_knowledge ADD COLUMN IF NOT EXISTS source_code TEXT;"))
+            conn.execute(text("ALTER TABLE erp_ui_knowledge ADD COLUMN IF NOT EXISTS business_rules TEXT;"))
+            
             conn.commit()
-            print("[Startup] 🧬 Migração de colunas adicionais para qa_tasks concluída com sucesso.")
+            print("[Startup] 🧬 Migração de colunas adicionais para qa_tasks, erp_scan_tasks e erp_ui_knowledge concluída com sucesso.")
     except Exception as e:
         print(f"[Startup] ⚠️ Erro ao criar/atualizar tabelas: {e}")
 
@@ -150,9 +171,20 @@ async def solve_support_ticket(
                     "is_binary": False
                 })
                 
+        # Busca todo o conhecimento acumulado e regras aprendidas de código Delphi / Varredura
+        knowledge_list = db.query(ERPUIKnowledge).all()
+        learned_context_str = ""
+        for idx, k in enumerate(knowledge_list):
+            if k.business_rules:
+                learned_context_str += f"\n--- [CONHECIMENTO COGNITIVO APRENDIDO #{idx+1} (Tela: {k.screen_name})] ---\n{k.business_rules}\n"
+        
+        full_description = description
+        if learned_context_str:
+            full_description = f"{description}\n\n[MEMÓRIA COGNITIVA DO ERP ENCONTRADA]:\n{learned_context_str}"
+            
         # Enfileira a tarefa para o agente local resolver
         task = SupportTask(
-            description=description,
+            description=full_description,
             files=processed_files,
             oracle_user=oracle_user,
             oracle_password=oracle_password,
@@ -218,6 +250,11 @@ def trigger_scan(data: dict, db: Session = Depends(get_db)):
         exe_path=data.get("exe_path"),
         username=data.get("username"),
         password=data.get("password"),
+        exe_version=data.get("exe_version"),
+        gef_grupo=data.get("gef_grupo"),
+        gef_empresa=data.get("gef_empresa"),
+        gef_filial=data.get("gef_filial"),
+        source_code=data.get("source_code"),
         status="pending"
     )
     db.add(task)
@@ -239,7 +276,11 @@ def get_pending_scan(db: Session = Depends(get_db)):
         "task_id": task.id,
         "exe_path": task.exe_path,
         "username": task.username,
-        "password": task.password
+        "password": task.password,
+        "exe_version": task.exe_version,
+        "gef_grupo": task.gef_grupo,
+        "gef_empresa": task.gef_empresa,
+        "gef_filial": task.gef_filial
     }
 
 @app.get("/api/ui-scan/status/{task_id}")
@@ -262,14 +303,68 @@ def update_scan_status(data: dict, db: Session = Depends(get_db)):
 
 @app.post("/api/ui-scan/result")
 def post_scan_result(data: dict, db: Session = Depends(get_db)):
-    """O Agente Windows envia a árvore de telas do ERP mapeada por pywinauto."""
+    """O Agente Windows envia a árvore de telas do ERP mapeada por pywinauto e a IA processa o aprendizado dos fontes."""
+    task_id = data.get("task_id")
+    screen_name = data.get("screen_name") or "Tela ERP Mapeada"
+    controls = data.get("controls")
+    
+    source_code = None
+    business_rules = None
+    
+    # 1. Recupera o código-fonte associado à tarefa da fila
+    if task_id:
+        task = db.query(ERPScanTask).filter_by(id=task_id).first()
+        if task and task.source_code:
+            source_code = task.source_code
+            print(f"[UI-Scanner] 🧠 Código-fonte encontrado na tarefa #{task_id}. Iniciando aprendizado cognitivo...")
+            
+            # 2. Chama a IA para ler o código-fonte Delphi e extrair as regras de negócio
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+                
+                prompt = f"""
+                Você é o Orquestrador Cognitivo de Engenharia de Software da Fábrica de Canais da Compusoft.
+                Analise detalhadamente o código-fonte Delphi Pascal (.pas / .dfm) da tela '{screen_name}' anexado abaixo.
+                
+                Sua missão é APRENDER A REGRA DE NEGÓCIO da funcionalidade e estruturar uma documentação rica de referência no formato Markdown em português brasileiro.
+                
+                CÓDIGO-FONTE DELPHI FORNECIDO:
+                {source_code}
+                
+                ESTRUTURA DE COMPONENTES VISUAIS MAPEADOS:
+                {str(controls)[:100] if controls else 'Nenhum'}
+                
+                Gere uma síntese técnica de negócios contendo:
+                1. 📝 **Propósito Principal da Tela** (O que o formulário Delphi resolve).
+                2. 📈 **Regras de Negócio e Cálculos Matemáticos** (Fórmulas de impostos, regras de ANTT, rateios, arredondamentos).
+                3. 🛡️ **Validações e Restrições de Fluxo** (Campos obrigatórios, limites numéricos, dependências de gravação).
+                4. 🗄️ **Tabelas e Campos do Banco de Dados Relacionados** (Campos lidos/gravados citados no código SQL/Delphi).
+                """
+                
+                models = ['gemini-2.0-flash-lite', 'gemini-1.5-flash-latest', 'gemini-2.0-flash']
+                for m in models:
+                    try:
+                        model = genai.GenerativeModel(m)
+                        response = model.generate_content(prompt)
+                        business_rules = response.text
+                        print(f"[UI-Scanner] ✅ Regras de negócio extraídas com sucesso via modelo: {m}")
+                        break
+                    except Exception as e:
+                        print(f"[UI-Scanner] Falha no modelo {m}: {e}")
+            except Exception as e:
+                print(f"[UI-Scanner] Erro geral ao acionar aprendizado do Gemini: {e}")
+                
+    # 3. Salva a base de conhecimento enriquecida no Postgres Neon
     knowledge = ERPUIKnowledge(
-        screen_name=data.get("screen_name"),
-        controls=data.get("controls")
+        screen_name=screen_name,
+        controls=controls,
+        source_code=source_code,
+        business_rules=business_rules
     )
     db.add(knowledge)
     db.commit()
-    return {"status": "success"}
+    return {"status": "success", "learned": business_rules is not None}
 
 @app.get("/api/ui-scan/knowledge")
 def get_ui_knowledge(db: Session = Depends(get_db)):
@@ -295,6 +390,10 @@ def trigger_qa_task(data: dict, db: Session = Depends(get_db)):
         password=clean_nul(data.get("password")),
         requirements_file_name=clean_nul(data.get("requirements_file_name")),
         requirements_file_content=clean_nul(data.get("requirements_file_content")),
+        db_object_name=clean_nul(data.get("db_object_name")),
+        db_tns=clean_nul(data.get("db_tns")),
+        db_user=clean_nul(data.get("db_user")),
+        db_password=clean_nul(data.get("db_password")),
         status="pending"
     )
     db.add(task)
@@ -318,7 +417,11 @@ def get_pending_qa_task(db: Session = Depends(get_db)):
         "username": task.username,
         "password": task.password,
         "requirements_file_name": task.requirements_file_name,
-        "requirements_file_content": task.requirements_file_content
+        "requirements_file_content": task.requirements_file_content,
+        "db_object_name": task.db_object_name,
+        "db_tns": task.db_tns,
+        "db_user": task.db_user,
+        "db_password": task.db_password
     }
 
 @app.get("/api/qa/status/{task_id}")
@@ -353,12 +456,18 @@ def post_qa_result(data: dict, db: Session = Depends(get_db)):
         
     task.status = "completed"
     
-    # Buscar conhecimento da tela mais recente para enriquecer o manual
-    # Para o MVP, pegamos a última tela mapeada ou fazemos busca genérica
-    ui_info = db.query(ERPUIKnowledge).order_by(ERPUIKnowledge.created_at.desc()).first()
+    # Busca todo o conhecimento acumulado e regras aprendidas de código Delphi / Varredura
+    knowledge_list = db.query(ERPUIKnowledge).all()
+    learned_memory_str = ""
+    for idx, k in enumerate(knowledge_list):
+        if k.business_rules:
+            learned_memory_str += f"\n--- [MEMÓRIA COGNITIVA ERP #{idx+1} (Tela: {k.screen_name})] ---\n{k.business_rules}\n"
+        if k.controls:
+            learned_memory_str += f"[Componentes da Tela {k.screen_name}]:\n{str(k.controls)[:80]}\n"
+            
     ui_controls_str = ""
-    if ui_info and ui_info.controls:
-        ui_controls_str = str(ui_info.controls[:40]) # Limita escopo de tokens
+    if knowledge_list:
+        ui_controls_str = str(knowledge_list[-1].controls[:40]) if knowledge_list[-1].controls else ""
         
     # Acionar a inteligência para documentação
     try:
@@ -378,20 +487,55 @@ def post_qa_result(data: dict, db: Session = Depends(get_db)):
         generated_text = ""
         
         prompt = f"""
-        Você é um Engenheiro de QA Sênior e Escritor Técnico de Manuais de ERP.
-        Com base no cenário testado e no log da automação de UI abaixo, gere dois documentos.
+        Você é o Orquestrador Cognitivo de QA e Auditor de Sistemas Legados ERP (Especialista em Delphi Pascal e Banco de Dados PL/SQL Oracle).
+        Sua missão é realizar uma AUDITORIA TRIDIMENSIONAL CRUZADA com base nos insumos abaixo.
         
         IMPORTANTE: Separe estritamente os dois documentos usando a tag [DIVIDER] no meio!
         
-        CENÁRIO TESTADO: {task.scenario}
-        LOGS DE EXECUÇÃO: {test_logs}
-        COMPONENTES DE INTERFACE CONHECIDOS: {ui_controls_str}
+        CENÁRIO TESTADO E CÓDIGOS FORNECIDOS:
+        {task.scenario}
         
-        Estrutura esperada:
+        LOGS DE EXECUÇÃO E CÓDIGOS DO BANCO EXTRAÍDOS:
+        {test_logs}
+        
+        COMPONENTES DE INTERFACE MAPEADOS DO ERP:
+        {ui_controls_str}
+        
+        📚 REGRAS DE NEGÓCIO E CONHECIMENTOS PREVIAMENTE APRENDIDOS (FONTES / BANCO / SCANNER):
+        {learned_memory_str}
+        
+        INSTRUÇÕES CRÍTICAS DE AUDITORIA CRUZADA (DELPHI PASCAL vs PL/SQL ORACLE vs REQUISITOS):
+        Se o usuário fornecer o código-fonte do sistema Delphi (arquivos .pas, units Pascal, forms .dfm) no "CENÁRIO TESTADO" ou arquivo anexo, E houver o código de banco Oracle extraído nos "LOGS DE EXECUÇÃO" (marcado por `[DB-AUDIT-FOUND]`), execute uma análise tridimensional de engenharia de software:
+        
+        1. **Alinhamento Matemático e Arredondamento:**
+           - Compare as fórmulas no Delphi Pascal (ex: uso de `RoundTo`, `Trunc`, divisões com `Double`) com o código PL/SQL Oracle (ex: `ROUND()`, `TRUNC()`, tipos `NUMBER`).
+           - Identifique vulnerabilidades de "diferença de centavos" em fretes, impostos (como piso mínimo ANTT) ou faturamento, que geram quebras de consistência.
+           
+        2. **Tratamento e Alinhamento de Exceções:**
+           - Verifique se os erros levantados no banco (`RAISE_APPLICATION_ERROR` ou triggers do Oracle) são devidamente capturados por blocos `try..except` no Delphi ou se causarão travamentos de tela ou loops infinitos no ERP.
+           
+        3. **Consistência de Tamanho e Tipo de Dados (UI vs Banco):**
+           - Compare o tamanho máximo dos campos de entrada mapeados na interface (inputs visualizados, `MaxLength` de TEdit) ou variáveis Delphi com o tamanho físico da coluna na tabela do Oracle (DDL). Aponte riscos de estouro de campo ("Value too large for column").
+           
+        4. **Geração de Patches:**
+           - Se encontrar divergências ou bugs lógicos, forneça OBRIGATORIAMENTE duas seções de correção claras:
+             - **Patch de Correção Delphi (Pascal):** Código Pascal limpo e corrigido.
+             - **Patch de Correção Oracle (PL/SQL):** Código SQL DDL/DML ou trigger PL/SQL corrigido.
+
+        Estrutura esperada do Relatório:
         
         --- INÍCIO DO RELATÓRIO ---
-        # 📋 Relatório de Teste de QA
-        Apresente uma análise técnica do teste, se passou ou falhou, tempos de resposta e estabilidade.
+        # 📋 Relatório de Teste de QA e Auditoria Tridimensional
+        Apresente uma análise técnica abrangente da execução visual e lógica de dados.
+        
+        - **Status Geral da Execução** (Aprovado / Falho)
+        - **Detalhes do Teste de Interface (Simulação de UI)**
+        - **🛡️ Auditoria Lógica Tridimensional (Delphi ↔ PL/SQL ↔ Regras de Negócio)**
+          - [Se houver códigos Pascal e PL/SQL, faça a análise cruzada detalhada de arredondamentos, loops de performance e tratamento de exceções. Se houver apenas um deles, faça a auditoria aprofundada dele em relação aos requisitos]
+        - **Tabela de Divergências e Inconsistências Detectadas**
+        - **🛠️ Patches de Correção Sugeridos (Delphi Pascal & Oracle PL/SQL)**
+          - [Forneça blocos de código prontos e otimizados para corrigir os bugs identificados]
+        - **Recomendações de Performance e Segurança**
         
         [DIVIDER]
         
@@ -400,25 +544,82 @@ def post_qa_result(data: dict, db: Session = Depends(get_db)):
         --- FIM ---
         """
         
+        system_prompt = """
+        Você é o Orquestrador Cognitivo de QA e Auditor de Sistemas Legados ERP da Fábrica da Compusoft.
+        Você trabalha com Temperatura Zero e determinismo absoluto.
+        
+        DIRETRIZES DE COMPORTAMENTO DEFENSIVO:
+        1. A REGRA DO "NÃO SEI": Se a informação ou os detalhes do sistema, tabelas do banco ou regras não estiverem descritos no contexto fornecido, no código Delphi anexado ou nos logs do banco, responda estritamente: 'Dados insuficientes para conclusão'. Nunca invente tabelas, campos ou regras.
+        2. CADEIA DE RACIOCÍNIO (Chain of Thought): Antes de fornecer qualquer veredito de auditoria ou recomendação final, pense passo a passo. Escreva detalhadamente sua justificativa em uma seção preliminar racional.
+        3. DELIMITADORES DE VARIÁVEIS: Isole dados brutos e instruções de entrada usando delimitadores como <xml>, ### ou """.
+        """
+
+        generated_text = ""
+        success_flag = False
+        
         for m in models:
             try:
-                print(f"[QA-Pipeline] Tentando modelo: {m}")
-                model = genai.GenerativeModel(m)
-                response = model.generate_content(prompt)
-                generated_text = response.text
-                print(f"[QA-Pipeline] Sucesso com o modelo: {m}")
-                break
+                print(f"[QA-Pipeline] Tentando modelo Criador: {m}")
+                # Pillar 1 & 5: Defensive System Prompt, Temperature 0.0 for deterministic execution
+                model = genai.GenerativeModel(
+                    model_name=m,
+                    generation_config={"temperature": 0.0, "top_p": 0.95},
+                    system_instruction=system_prompt
+                )
+                
+                # Multi-Agent loop with Auto-Retry (Up to 2 correction attempts)
+                current_prompt = prompt
+                for attempt in range(3):
+                    print(f"[QA-Pipeline] Tentativa de geração #{attempt + 1}...")
+                    response = model.generate_content(current_prompt)
+                    candidate_text = response.text
+                    
+                    # Pillar 3 & 4: Structured Validation & Critic Agent Cross-Checking
+                    if "[DIVIDER]" not in candidate_text:
+                        print("[QA-Pipeline] Erro de validação de formato (tag [DIVIDER] ausente). Forçando auto-correção...")
+                        current_prompt = f"{prompt}\n\n⚠️ ATENÇÃO: Sua resposta anterior falhou na validação de formato pois você esqueceu de incluir a tag [DIVIDER] dividindo o Relatório de QA e o Manual do Usuário. Reescreva o conteúdo incluindo a tag obrigatoriamente."
+                        continue
+                        
+                    # Agente Avaliador (Critic Agent) com temperatura zero
+                    print("[QA-Pipeline] 🛡️ Acionando Agente Avaliador (Critic Agent) para auditoria cruzada...")
+                    critic_prompt = f"""
+                    Você é o Agente Avaliador Técnico de Sistemas (Critic Agent) de extrema rigidez.
+                    Sua missão é revisar o conteúdo gerado por um colega agente em busca de alucinações lógicas, violação da Regra do 'Não Sei', invenções de fatos ou inconsistência com o cenário e requisitos fornecidos.
+                    
+                    CONTEÚDO ANALISADO:
+                    {candidate_text}
+                    
+                    DADOS DO CENÁRIO ORIGINAL:
+                    Cenário: {task.scenario}
+                    Logs: {test_logs}
+                    Requisitos/Código Delphi: {task.requirements_file_content}
+                    
+                    Responda estritamente no seguinte formato:
+                    STATUS: [APROVADO] ou [REPROVADO]
+                    CORREÇÕES: [Se REPROVADO, liste detalhadamente o que o agente inventou, alucinou ou formatou errado. Se APROVADO, deixe em branco]
+                    """
+                    
+                    critic_response = model.generate_content(critic_prompt)
+                    critic_result = critic_response.text
+                    print(f"[QA-Pipeline] 🛡️ Resultado do Critic Agent:\n{critic_result}")
+                    
+                    if "STATUS: [REPROVADO]" in critic_result:
+                        print("[QA-Pipeline] Geração reprovada pelo Critic Agent! Iniciando auto-correção...")
+                        current_prompt = f"{prompt}\n\n⚠️ ATENÇÃO: Sua tentativa anterior foi REPROVADA pelo Agente Avaliador com os seguintes desvios apontados:\n{critic_result}\nPor favor, refaça o trabalho corrigindo todos esses pontos, mantendo ancoragem estrita e sem inventar dados."
+                    else:
+                        print("[QA-Pipeline] 🎉 Geração aprovada com sucesso pelo Critic Agent!")
+                        generated_text = candidate_text
+                        success_flag = True
+                        break
+                
+                if success_flag:
+                    break
             except Exception as e:
-                error_msg = str(e)
-                if "429" in error_msg:
-                    print(f"[QA-Pipeline] Cota excedida no modelo {m}. Tentando próximo...")
-                    continue
-                else:
-                    print(f"[QA-Pipeline] Erro no modelo {m}: {e}")
-                    continue
+                print(f"[QA-Pipeline] Erro de processamento no modelo {m}: {e}")
+                continue
                 
         if not generated_text:
-            raise Exception("IA falhou no processamento de escrita técnica.")
+            raise Exception("IA falhou no processamento de escrita técnica pós auditoria cruzada.")
             
         parts = generated_text.split("[DIVIDER]")
         report_md = parts[0].strip()

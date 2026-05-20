@@ -12,6 +12,25 @@ export default function QAPipeline() {
   const [fileName, setFileName] = useState("");
   const [fileContent, setFileContent] = useState("");
   
+  // Código-fonte Delphi fornecido pelo usuário para análise cruzada
+  const [delphiFileName, setDelphiFileName] = useState("");
+  const [delphiSourceCode, setDelphiSourceCode] = useState("");
+  
+  // Estados para Auditoria de Banco de Dados Oracle
+  const [tnsList, setTnsList] = useState<string[]>(["XE"]);
+  const [dbObjectName, setDbObjectName] = useState("");
+  const [dbTns, setDbTns] = useState("XE");
+  const [dbUser, setDbUser] = useState("");
+  const [dbPassword, setDbPassword] = useState("");
+  const [enableDbAudit, setEnableDbAudit] = useState(false);
+
+  // Estados para Contexto de Versão & GEF do ERP
+  const [exeVersion, setExeVersion] = useState("");
+  const [gefGrupo, setGefGrupo] = useState("");
+  const [gefEmpresa, setGefEmpresa] = useState("");
+  const [gefFilial, setGefFilial] = useState("");
+  const [enableGef, setEnableGef] = useState(false);
+  
   const [status, setStatus] = useState("idle"); // idle, pending, running, completed, failed
   const [loading, setLoading] = useState(false);
   const [reportsList, setReportsList] = useState([]);
@@ -32,6 +51,22 @@ export default function QAPipeline() {
   useEffect(() => {
     fetchReports();
     const interval = setInterval(fetchReports, 5000);
+    
+    // Carrega dinamicamente a lista de perfis TNS Oracle sincronizados localmente do banco
+    const fetchTns = async () => {
+      try {
+        const resp = await fetch('/api/support/tnsnames');
+        const data = await resp.json();
+        if (data.tns_names && data.tns_names.length > 0) {
+          setTnsList(data.tns_names);
+          setDbTns(data.tns_names[0]);
+        }
+      } catch (err) {
+        console.error("Erro ao buscar TNS Names:", err);
+      }
+    };
+    fetchTns();
+
     return () => clearInterval(interval);
   }, []);
 
@@ -69,8 +104,18 @@ export default function QAPipeline() {
           exe_path: exePath,
           username,
           password,
-          requirements_file_name: fileName,
-          requirements_file_content: fileContent
+          requirements_file_name: fileName || (delphiFileName ? "Delphi_Unit_Cross_Audit" : ""),
+          requirements_file_content: delphiSourceCode 
+            ? `[REQUISITOS / REGRAS DE NEGÓCIO]:\n${fileContent || 'Regras fornecidas no Cenário Principal.'}\n\n[CÓDIGO FONTE DELPHI PASCAL DO SISTEMA]:\n${delphiSourceCode}`
+            : fileContent,
+          db_object_name: enableDbAudit ? dbObjectName : "",
+          db_tns: enableDbAudit ? dbTns : "",
+          db_user: enableDbAudit ? dbUser : "",
+          db_password: enableDbAudit ? dbPassword : "",
+          exe_version: enableGef ? exeVersion : "",
+          gef_grupo: enableGef ? gefGrupo : "",
+          gef_empresa: enableGef ? gefEmpresa : "",
+          gef_filial: enableGef ? gefFilial : ""
         })
       });
 
@@ -240,8 +285,76 @@ export default function QAPipeline() {
                 value={scenario}
                 onChange={(e) => setScenario(e.target.value)}
                 placeholder="Ex: Abrir tela de faturamento, preencher cliente padrão, confirmar emissão da nota fiscal..."
-              />
+             </div>
+
+            {/* Seção Premium de Inserção de Código-Fonte Delphi Pascal */}
+            <div className="bg-slate-950/40 border border-slate-800/60 rounded-xl p-4 space-y-3">
+              <label className="block text-xs text-slate-400 font-semibold flex items-center gap-2">
+                <Cpu size={14} className="text-blue-400" />
+                Código-Fonte do Sistema Delphi (.pas / .dfm)
+              </label>
+              
+              <div className="flex items-center gap-3">
+                <input 
+                  type="file" 
+                  id="delphi-file"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      setDelphiFileName(file.name);
+                      const reader = new FileReader();
+                      reader.onload = (ev) => {
+                        if (ev.target?.result) {
+                          setDelphiSourceCode(ev.target.result as string);
+                        }
+                      };
+                      reader.readAsText(file);
+                    }
+                  }}
+                  accept=".pas,.dfm,.pascal,.txt"
+                />
+                <label 
+                  htmlFor="delphi-file"
+                  className="bg-slate-950 border border-dashed border-slate-800 hover:border-blue-500/50 cursor-pointer rounded-xl p-3 text-xs text-slate-400 hover:text-slate-200 transition flex items-center gap-2 flex-1 justify-center"
+                >
+                  <Cpu size={16} className="text-blue-400 animate-pulse" />
+                  {delphiFileName ? `Código Anexado: ${delphiFileName}` : "Anexar Código Delphi (.pas / .dfm)"}
+                </label>
+                {delphiFileName && (
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setDelphiFileName("");
+                      setDelphiSourceCode("");
+                    }}
+                    className="p-3 bg-red-950/40 hover:bg-red-900/60 border border-red-800/40 hover:border-red-700 rounded-xl text-xs text-red-400 transition font-medium"
+                  >
+                    Remover
+                  </button>
+                )}
+              </div>
+
+              <div>
+                <textarea 
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-mono text-emerald-400 focus:outline-none focus:border-blue-500 transition h-40 resize-y"
+                  value={delphiSourceCode}
+                  onChange={(e) => setDelphiSourceCode(e.target.value)}
+                  placeholder="Ou cole seu código Delphi Pascal aqui para Auditoria Cruzada...
+Ex:
+procedure TFormFaturamento.ConfirmarPedido;
+begin
+  if Pedido.Valor > 0 then
+    Faturar(Pedido);
+end;"
+                />
+                <div className="flex justify-between items-center text-[10px] text-slate-500 mt-1 px-1">
+                  <span>✨ Análise Cruzada: Delphi ↔ Oracle PL/SQL ↔ Regras de Negócio</span>
+                  <span>{delphiSourceCode.length} caracteres lidos</span>
+                </div>
+              </div>
             </div>
+
             <div>
               <label className="block text-xs text-slate-400 mb-2">Ou anexe um arquivo de requisitos (.txt, .pas, .sql, etc.)</label>
               <div className="flex items-center gap-3">
@@ -277,6 +390,143 @@ export default function QAPipeline() {
                 <div className="mt-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg text-[10px] text-blue-400 flex items-center justify-between">
                   <span>📎 Anexado: <strong>{fileName}</strong></span>
                   <span>{fileContent.length} caracteres lidos</span>
+                </div>
+              )}
+            </div>
+
+            {/* Configurações de Contexto: Versão & GEF do ERP */}
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Cpu size={15} className="text-blue-400" />
+                  <span className="text-xs font-semibold text-slate-300">Definir Versão & GEF (ERP)</span>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="sr-only peer"
+                    checked={enableGef}
+                    onChange={(e) => setEnableGef(e.target.checked)}
+                  />
+                  <div className="w-9 h-5 bg-slate-850 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-white"></div>
+                </label>
+              </div>
+
+              {enableGef && (
+                <div className="space-y-3 pt-2 border-t border-slate-900/60 animate-in fade-in duration-200">
+                  <div>
+                    <label className="block text-[10px] text-slate-400 mb-1">Versão do Executável desejada</label>
+                    <input 
+                      type="text"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-none focus:border-blue-500 transition text-slate-100"
+                      placeholder="Ex: VERSAO 12"
+                      value={exeVersion}
+                      onChange={(e) => setExeVersion(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-slate-400 mb-1 text-center">Grupo</label>
+                      <input 
+                        type="text"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-none focus:border-blue-500 transition text-center"
+                        placeholder="1"
+                        value={gefGrupo}
+                        onChange={(e) => setGefGrupo(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-400 mb-1 text-center">Empresa</label>
+                      <input 
+                        type="text"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-none focus:border-blue-500 transition text-center"
+                        placeholder="10"
+                        value={gefEmpresa}
+                        onChange={(e) => setGefEmpresa(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-400 mb-1 text-center">Filial</label>
+                      <input 
+                        type="text"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-none focus:border-blue-500 transition text-center"
+                        placeholder="01"
+                        value={gefFilial}
+                        onChange={(e) => setGefFilial(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Seção Premium de Auditoria de Banco de Dados Oracle */}
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert size={16} className="text-purple-400" />
+                  <span className="text-xs font-semibold text-slate-300">Auditar Lógica do Banco (Oracle)</span>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="sr-only peer"
+                    checked={enableDbAudit}
+                    onChange={(e) => setEnableDbAudit(e.target.checked)}
+                  />
+                  <div className="w-9 h-5 bg-slate-850 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600 peer-checked:after:bg-white"></div>
+                </label>
+              </div>
+              
+              {enableDbAudit && (
+                <div className="space-y-3 pt-2 border-t border-slate-900/60 animate-in fade-in duration-200">
+                  <div>
+                    <label className="block text-[10px] text-slate-400 mb-1">Objeto a Auditar (Trigger, Procedure, View ou Tabela)</label>
+                    <input 
+                      type="text"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-none focus:border-purple-500 transition uppercase"
+                      placeholder="Ex: TRG_PISO_MINIMO_ANTT"
+                      value={dbObjectName}
+                      onChange={(e) => setDbObjectName(e.target.value)}
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-slate-400 mb-1">Perfil de Conexão TNS</label>
+                      <select
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-none focus:border-purple-500 transition"
+                        value={dbTns}
+                        onChange={(e) => setDbTns(e.target.value)}
+                      >
+                        {tnsList.map((tns) => (
+                          <option key={tns} value={tns}>{tns}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-400 mb-1">Usuário do Banco</label>
+                      <input 
+                        type="text"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-none focus:border-purple-500 transition"
+                        placeholder="Ex: SYSTEM"
+                        value={dbUser}
+                        onChange={(e) => setDbUser(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-[10px] text-slate-400 mb-1">Senha do Banco</label>
+                    <input 
+                      type="password"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-none focus:border-purple-500 transition"
+                      placeholder="Senha de acesso ao Oracle"
+                      value={dbPassword}
+                      onChange={(e) => setDbPassword(e.target.value)}
+                    />
+                  </div>
                 </div>
               )}
             </div>

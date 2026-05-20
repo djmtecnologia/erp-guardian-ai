@@ -8,6 +8,18 @@ export default function UIScanner() {
   const [exePath, setExePath] = useState("C:\\COMPUSOFT\\PRINCIPAL\\PRINCIPAL.EXE");
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
+  
+  // Parâmetros de contexto Versão e GEF (Grupo/Empresa/Filial)
+  const [exeVersion, setExeVersion] = useState("");
+  const [gefGrupo, setGefGrupo] = useState("");
+  const [gefEmpresa, setGefEmpresa] = useState("");
+  const [gefFilial, setGefFilial] = useState("");
+  const [enableGef, setEnableGef] = useState(false);
+  
+  // Estados para Código-Fonte / Zip anexado ao scanner para Aprendizado
+  const [sourceFilesName, setSourceFilesName] = useState("");
+  const [sourceCode, setSourceCode] = useState("");
+  
   const [status, setStatus] = useState("idle"); // idle, pending, running, completed, failed
   const [loading, setLoading] = useState(false);
   const [knowledgeList, setKnowledgeList] = useState([]);
@@ -48,7 +60,12 @@ export default function UIScanner() {
         body: JSON.stringify({
           exe_path: exePath,
           username: username,
-          password: password
+          password: password,
+          exe_version: enableGef ? exeVersion : "",
+          gef_grupo: enableGef ? gefGrupo : "",
+          gef_empresa: enableGef ? gefEmpresa : "",
+          gef_filial: enableGef ? gefFilial : "",
+          source_code: sourceCode
         })
       });
       const data = await resp.json();
@@ -200,6 +217,142 @@ export default function UIScanner() {
                   onChange={(e) => setPassword(e.target.value)}
                 />
               </div>
+            </div>
+
+            {/* Configurações Avançadas: Contexto de Versão & GEF */}
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Cpu size={15} className="text-emerald-400" />
+                  <span className="text-xs font-semibold text-slate-300">Definir Versão & GEF</span>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="sr-only peer"
+                    checked={enableGef}
+                    onChange={(e) => setEnableGef(e.target.checked)}
+                  />
+                  <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600 peer-checked:after:bg-white"></div>
+                </label>
+              </div>
+
+              {enableGef && (
+                <div className="space-y-3 pt-2 border-t border-slate-900/60 animate-in fade-in duration-200">
+                  <div>
+                    <label className="block text-[10px] text-slate-400 mb-1">Versão do Executável desejada</label>
+                    <input 
+                      type="text"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500 transition text-slate-100"
+                      placeholder="Ex: VERSAO 12"
+                      value={exeVersion}
+                      onChange={(e) => setExeVersion(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-slate-400 mb-1 text-center">Grupo</label>
+                      <input 
+                        type="text"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500 transition text-center"
+                        placeholder="1"
+                        value={gefGrupo}
+                        onChange={(e) => setGefGrupo(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-400 mb-1 text-center">Empresa</label>
+                      <input 
+                        type="text"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500 transition text-center"
+                        placeholder="10"
+                        value={gefEmpresa}
+                        onChange={(e) => setGefEmpresa(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-400 mb-1 text-center">Filial</label>
+                      <input 
+                        type="text"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500 transition text-center"
+                        placeholder="01"
+                        value={gefFilial}
+                        onChange={(e) => setGefFilial(e.target.value)}
+                      />
+                    </div>
+                </div>
+              )}
+            </div>
+
+            {/* Importar e Aprender com Fontes Delphi */}
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <ShieldAlert size={15} className="text-emerald-400 animate-pulse" />
+                <span className="text-xs font-semibold text-slate-300">Importar Fontes do ERP (.pas, .dfm, .zip)</span>
+              </div>
+              <p className="text-[10px] text-slate-500 leading-relaxed font-normal">
+                Anexe os fontes da tela (ex: units Pascal `.pas`, formulários `.dfm`, scripts SQL ou arquivos compactados). A inteligência artificial irá extrair e aprender permanentemente todas as regras de negócio!
+              </p>
+              
+              <div className="flex items-center gap-3">
+                <input 
+                  type="file" 
+                  id="scanner-delphi-files"
+                  className="hidden"
+                  multiple
+                  onChange={async (e) => {
+                    const files = e.target.files;
+                    if (files && files.length > 0) {
+                      let compiledCode = "";
+                      for (let i = 0; i < files.length; i++) {
+                        const file = files[i];
+                        const content = await new Promise<string>((resolve) => {
+                          const reader = new FileReader();
+                          reader.onload = (ev) => resolve(ev.target?.result as string || "");
+                          reader.readAsText(file);
+                        });
+                        compiledCode += `\n--- ARQUIVO FONTE: ${file.name} ---\n${content}\n`;
+                      }
+                      setSourceFilesName(`${files.length} arquivos selecionados`);
+                      setSourceCode(compiledCode);
+                    }
+                  }}
+                  accept=".pas,.dfm,.pascal,.txt,.sql,.zip,.json"
+                />
+                <label 
+                  htmlFor="scanner-delphi-files"
+                  className="bg-slate-950 border border-dashed border-slate-800 hover:border-emerald-500/50 cursor-pointer rounded-xl p-3 text-xs text-slate-400 hover:text-slate-200 transition flex items-center gap-2 flex-1 justify-center font-medium"
+                >
+                  <Cpu size={15} className="text-emerald-400 animate-bounce" />
+                  {sourceFilesName ? sourceFilesName : "Selecionar Fontes da Tela"}
+                </label>
+                {sourceFilesName && (
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setSourceFilesName("");
+                      setSourceCode("");
+                    }}
+                    className="p-3 bg-red-950/40 hover:bg-red-900/60 border border-red-800/40 hover:border-red-700 rounded-xl text-xs text-red-400 transition font-medium"
+                  >
+                    Remover
+                  </button>
+                )}
+              </div>
+
+              {sourceCode && (
+                <div className="bg-slate-900 border border-slate-850 rounded-lg p-2.5 space-y-1.5 animate-in fade-in duration-200">
+                  <div className="flex justify-between items-center text-[9px] text-slate-500 font-semibold">
+                    <span>✨ Compilação de Aprendizado Pronta</span>
+                    <span>{sourceCode.length} caracteres lidos</span>
+                  </div>
+                  <pre className="text-[10px] font-mono text-emerald-400 max-h-24 overflow-y-auto bg-slate-950 p-2 rounded border border-slate-850 leading-relaxed">
+                    {sourceCode.substring(0, 1000)}
+                    {sourceCode.length > 1000 && "\n... [Código truncado na visualização] ..."}
+                  </pre>
+                </div>
+              )}
             </div>
 
             <button 

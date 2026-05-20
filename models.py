@@ -55,6 +55,11 @@ class ERPScanTask(Base):
     exe_path = Column(String, nullable=False)
     username = Column(String, nullable=False)
     password = Column(String, nullable=False)
+    exe_version = Column(String, nullable=True)
+    gef_grupo = Column(String, nullable=True)
+    gef_empresa = Column(String, nullable=True)
+    gef_filial = Column(String, nullable=True)
+    source_code = Column(Text, nullable=True)  # Código-fonte Delphi anexado pelo usuário no scanner (.pas/.zip)
     status = Column(String, default="pending")  # pending, running, completed, failed
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -67,6 +72,8 @@ class ERPUIKnowledge(Base):
     id = Column(Integer, primary_key=True)
     screen_name = Column(String, index=True)
     controls = Column(JSON)  # Árvore de botões, inputs, menus mapeados
+    source_code = Column(Text, nullable=True)      # Cópia do código fonte da tela
+    business_rules = Column(Text, nullable=True)   # Regras de Negócio aprendidas e extraídas pela IA
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class QATask(Base):
@@ -82,6 +89,14 @@ class QATask(Base):
     password = Column(String, nullable=True)
     requirements_file_name = Column(String, nullable=True)
     requirements_file_content = Column(Text, nullable=True)
+    db_object_name = Column(String, nullable=True)  # Nome da Trigger, Procedure ou View para auditores
+    db_tns = Column(String, nullable=True)          # TNS de conexão Oracle selecionado
+    db_user = Column(String, nullable=True)         # Usuário de banco Oracle para auditoria
+    db_password = Column(String, nullable=True)     # Senha de banco Oracle para auditoria
+    exe_version = Column(String, nullable=True)     # Versão do Executável para faturamento
+    gef_grupo = Column(String, nullable=True)       # Contexto GEF: Grupo
+    gef_empresa = Column(String, nullable=True)     # Contexto GEF: Empresa
+    gef_filial = Column(String, nullable=True)      # Contexto GEF: Filial
     status = Column(String, default="pending")  # pending, running, completed, failed
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

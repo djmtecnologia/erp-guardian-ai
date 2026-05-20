@@ -155,12 +155,17 @@ async def poll_ui_scan_tasks():
                 exe_path = data.get("exe_path")
                 username = data.get("username")
                 password = data.get("password")
+                exe_version = data.get("exe_version")
+                gef_grupo = data.get("gef_grupo")
+                gef_empresa = data.get("gef_empresa")
+                gef_filial = data.get("gef_filial")
                 
                 print(f"\n[Monitor] 📥 Nova tarefa de Varredura de UI detectada! ID: {task_id}")
                 # Executa a varredura em uma thread separada para não congelar o monitoramento de arquivos
                 await asyncio.to_thread(
                     watcher.run_scan_workflow,
-                    task_id, exe_path, username, password
+                    task_id, exe_path, username, password,
+                    exe_version, gef_grupo, gef_empresa, gef_filial
                 )
         except Exception:
             pass
@@ -185,6 +190,14 @@ async def poll_qa_tasks():
                 username = data.get("username") or "admin"
                 password = data.get("password") or ""
                 req_content = data.get("requirements_file_content")
+                db_object_name = data.get("db_object_name")
+                db_tns = data.get("db_tns")
+                db_user = data.get("db_user")
+                db_password = data.get("db_password")
+                exe_version = data.get("exe_version")
+                gef_grupo = data.get("gef_grupo")
+                gef_empresa = data.get("gef_empresa")
+                gef_filial = data.get("gef_filial")
                 
                 full_scenario = scenario
                 if req_content:
@@ -192,10 +205,12 @@ async def poll_qa_tasks():
                 
                 print(f"\n[Monitor] 📥 Nova tarefa de QA detectada! ID: {task_id} - Executável: {exe_path}")
                 
-                # Executa o fluxo de testes simulado (FlaUI/pywinauto)
+                # Executa o fluxo de testes simulado (FlaUI/pywinauto) + auditoria de banco Oracle
                 logs = await asyncio.to_thread(
                     qa_engine.execute_qa_test,
-                    task_id, full_scenario, exe_path, username, password, req_content
+                    task_id, full_scenario, exe_path, username, password, req_content,
+                    db_object_name, db_tns, db_user, db_password,
+                    exe_version, gef_grupo, gef_empresa, gef_filial
                 )
                 
                 # Envia o log gerado de volta para a nuvem processar a documentação
