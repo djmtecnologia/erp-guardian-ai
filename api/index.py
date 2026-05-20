@@ -552,7 +552,7 @@ def post_qa_result(data: dict, db: Session = Depends(get_db)):
         DIRETRIZES DE COMPORTAMENTO DEFENSIVO:
         1. A REGRA DO "NÃO SEI": Se a informação ou os detalhes do sistema, tabelas do banco ou regras não estiverem descritos no contexto fornecido, no código Delphi anexado ou nos logs do banco, responda estritamente: 'Dados insuficientes para conclusão'. Nunca invente tabelas, campos ou regras.
         2. CADEIA DE RACIOCÍNIO (Chain of Thought): Antes de fornecer qualquer veredito de auditoria ou recomendação final, pense passo a passo. Escreva detalhadamente sua justificativa em uma seção preliminar racional.
-        3. DELIMITADORES DE VARIÁVEIS: Isole dados brutos e instruções de entrada usando delimitadores como <xml>, ### ou """.
+        3. DELIMITADORES DE VARIÁVEIS: Isole dados brutos e instruções de entrada usando delimitadores como <xml>, ### ou três aspas ("\"\"\"").
         """
 
         generated_text = ""
