@@ -322,59 +322,108 @@ def post_scan_result(data: dict, db: Session = Depends(get_db)):
     task_id = data.get("task_id")
     screen_name = data.get("screen_name") or "Tela ERP Mapeada"
     controls = data.get("controls")
-    
+
     source_code = None
+    relevant_code = None
     business_rules = None
-    
-    # 1. Recupera o código-fonte associado à tarefa da fila
+
+    # 1. Recupera o código-fonte completo associado à tarefa
     if task_id:
         task = db.query(ERPScanTask).filter_by(id=task_id).first()
         if task and task.source_code:
             source_code = task.source_code
-            print(f"[UI-Scanner] 🧠 Código-fonte encontrado na tarefa #{task_id}. Iniciando aprendizado cognitivo...")
-            
-            # 2. Chama a IA para ler o código-fonte Delphi e extrair as regras de negócio
+
+            # -------------------------------------------------------
+            # 2. FILTRAGEM INTELIGENTE: extrai apenas os blocos do
+            #    arquivo fonte que correspondem ao nome da tela atual.
+            #    O código completo fica no banco; o Gemini só recebe
+            #    o trecho relevante (até 60.000 chars).
+            # -------------------------------------------------------
+            import re
+
+            # Normaliza o nome da tela para comparação (remove espaços, maiúsculas)
+            screen_slug = re.sub(r'[^a-z0-9]', '', screen_name.lower())
+
+            # Divide o código nas seções por arquivo (cabeçalho inserido pelo frontend)
+            # Formato: "--- ARQUIVO FONTE: NomeArquivo.pas ---"
+            sections = re.split(r'\n---\s*(?:ARQUIVO FONTE|FONTE DELPHI)(?:\s*\(ZIP\))?:\s*(.+?)\s*---\n', source_code)
+
+            # sections[0] = texto antes do primeiro separador (ignorar)
+            # sections[1] = nome do arquivo 1, sections[2] = conteúdo 1, etc.
+            matched_sections = []
+            fallback_sections = []  # caso sem match exato, pega os primeiros arquivos
+
+            i = 1
+            while i < len(sections) - 1:
+                file_name = sections[i].strip()
+                file_content = sections[i + 1]
+                i += 2
+
+                # Normaliza o nome do arquivo para comparação
+                file_slug = re.sub(r'[^a-z0-9]', '', file_name.lower())
+
+                # Match: nome do arquivo contém palavras do nome da tela ou vice-versa
+                screen_words = [w for w in re.findall(r'[a-z]{3,}', screen_slug) if w not in ('tela', 'form', 'frm', 'unit', 'main')]
+                is_match = any(w in file_slug for w in screen_words) or any(w in screen_slug for w in re.findall(r'[a-z]{3,}', file_slug))
+
+                if is_match:
+                    matched_sections.append(f"=== {file_name} ===\n{file_content}")
+                else:
+                    fallback_sections.append(f"=== {file_name} ===\n{file_content[:2000]}")  # preview dos outros
+
+            MAX_CHARS = 60_000
+
+            if matched_sections:
+                relevant_code = "\n".join(matched_sections)[:MAX_CHARS]
+                print(f"[UI-Scanner] 🎯 {len(matched_sections)} arquivo(s) fonte correspondente(s) à tela '{screen_name}' encontrado(s).")
+            else:
+                # Sem match direto: envia os primeiros arquivos como contexto geral
+                relevant_code = "\n".join(fallback_sections)[:MAX_CHARS]
+                print(f"[UI-Scanner] 🔍 Nenhum fonte específico para '{screen_name}'. Usando contexto geral ({len(fallback_sections)} arquivos).")
+
+            print(f"[UI-Scanner] 🧠 Iniciando aprendizado cognitivo ({len(relevant_code):,} chars enviados ao Gemini)...")
+
+            # 3. Chama o Gemini com apenas o trecho relevante
             try:
                 import google.generativeai as genai
                 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-                
-                prompt = f"""
-                Você é o Orquestrador Cognitivo de Engenharia de Software da Fábrica de Canais da Compusoft.
-                Analise detalhadamente o código-fonte Delphi Pascal (.pas / .dfm) da tela '{screen_name}' anexado abaixo.
-                
-                Sua missão é APRENDER A REGRA DE NEGÓCIO da funcionalidade e estruturar uma documentação rica de referência no formato Markdown em português brasileiro.
-                
-                CÓDIGO-FONTE DELPHI FORNECIDO:
-                {source_code}
-                
-                ESTRUTURA DE COMPONENTES VISUAIS MAPEADOS:
-                {str(controls)[:100] if controls else 'Nenhum'}
-                
-                Gere uma síntese técnica de negócios contendo:
-                1. 📝 **Propósito Principal da Tela** (O que o formulário Delphi resolve).
-                2. 📈 **Regras de Negócio e Cálculos Matemáticos** (Fórmulas de impostos, regras de ANTT, rateios, arredondamentos).
-                3. 🛡️ **Validações e Restrições de Fluxo** (Campos obrigatórios, limites numéricos, dependências de gravação).
-                4. 🗄️ **Tabelas e Campos do Banco de Dados Relacionados** (Campos lidos/gravados citados no código SQL/Delphi).
-                """
-                
-                models = ['gemini-2.0-flash-lite', 'gemini-1.5-flash-latest', 'gemini-2.0-flash']
+
+                controls_preview = str(controls)[:500] if controls else "Nenhum componente mapeado."
+
+                prompt = f"""Você é o Orquestrador Cognitivo de Engenharia de Software da Fábrica de Canais da Compusoft.
+Analise o código-fonte Delphi Pascal (.pas / .dfm) relacionado à tela '{screen_name}' e gere documentação técnica de referência em Markdown, em português brasileiro.
+
+CÓDIGO-FONTE DELPHI RELEVANTE:
+{relevant_code}
+
+COMPONENTES VISUAIS MAPEADOS PELO AGENTE WINDOWS:
+{controls_preview}
+
+Gere uma síntese técnica contendo:
+1. 📝 **Propósito Principal da Tela** — O que o formulário resolve no contexto do ERP.
+2. 📈 **Regras de Negócio e Cálculos** — Fórmulas, impostos, rateios, regras de ANTT, arredondamentos.
+3. 🛡️ **Validações e Restrições de Fluxo** — Campos obrigatórios, limites, dependências de gravação.
+4. 🗄️ **Tabelas e Campos do Banco Relacionados** — Campos SQL/Delphi lidos ou gravados.
+5. 🔗 **Integrações e Dependências** — Outras units, procedures ou módulos chamados."""
+
+                models = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash-latest']
                 for m in models:
                     try:
                         model = genai.GenerativeModel(m)
                         response = model.generate_content(prompt)
                         business_rules = response.text
-                        print(f"[UI-Scanner] ✅ Regras de negócio extraídas com sucesso via modelo: {m}")
+                        print(f"[UI-Scanner] ✅ Regras de negócio extraídas via {m} para '{screen_name}'.")
                         break
                     except Exception as e:
                         print(f"[UI-Scanner] Falha no modelo {m}: {e}")
             except Exception as e:
-                print(f"[UI-Scanner] Erro geral ao acionar aprendizado do Gemini: {e}")
-                
-    # 3. Salva a base de conhecimento enriquecida no Postgres Neon
+                print(f"[UI-Scanner] Erro geral ao acionar Gemini: {e}")
+
+    # 4. Salva a base de conhecimento enriquecida no Postgres Neon
     knowledge = ERPUIKnowledge(
         screen_name=screen_name,
         controls=controls,
-        source_code=source_code,
+        source_code=relevant_code,   # salva apenas o trecho relevante, não o ZIP inteiro
         business_rules=business_rules
     )
     db.add(knowledge)
