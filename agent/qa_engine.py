@@ -147,6 +147,10 @@ class QAAutomationEngine:
 
             time.sleep(6) # Aguardar faturamento do menu principal do ERP
 
+            # Aguarda menus do ERP carregarem completamente antes de prosseguir
+            self.log("⏳ Aguardando 10s para os menus do ERP carregarem completamente...")
+            time.sleep(10)
+
             self.log("Passo 6: Verificando se a tela principal do ERP carregou...")
             main_dlg = app.top_window()
             self.log(f"Sucesso: Janela principal detectada: '{main_dlg.window_text()}'")

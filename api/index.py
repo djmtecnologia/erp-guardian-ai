@@ -73,6 +73,7 @@ def auto_create_tables():
             # erp_ui_knowledge
             conn.execute(text("ALTER TABLE erp_ui_knowledge ADD COLUMN IF NOT EXISTS source_code TEXT;"))
             conn.execute(text("ALTER TABLE erp_ui_knowledge ADD COLUMN IF NOT EXISTS business_rules TEXT;"))
+            conn.execute(text("ALTER TABLE erp_ui_knowledge ADD COLUMN IF NOT EXISTS embedding JSON;"))
             
             conn.commit()
             print("[Startup] 🧬 Migração de colunas adicionais para qa_tasks, erp_scan_tasks e erp_ui_knowledge concluída com sucesso.")
@@ -172,16 +173,23 @@ async def solve_support_ticket(
                     "is_binary": False
                 })
                 
-        # Busca todo o conhecimento acumulado e regras aprendidas de código Delphi / Varredura
-        knowledge_list = db.query(ERPUIKnowledge).all()
+        # Busca semântica: encontra apenas o conhecimento RELEVANTE ao chamado (Top-5)
+        from api.embeddings import find_relevant_knowledge
+        
+        all_knowledge = db.query(ERPUIKnowledge).filter(
+            ERPUIKnowledge.business_rules.isnot(None)
+        ).all()
+        
+        relevant_knowledge = find_relevant_knowledge(description, all_knowledge, top_k=5)
+        
         learned_context_str = ""
-        for idx, k in enumerate(knowledge_list):
-            if k.business_rules:
-                learned_context_str += f"\n--- [CONHECIMENTO COGNITIVO APRENDIDO #{idx+1} (Tela: {k.screen_name})] ---\n{k.business_rules}\n"
+        for idx, k in enumerate(relevant_knowledge):
+            score = getattr(k, '_similarity', 0.0)
+            learned_context_str += f"\n--- [CONHECIMENTO RELEVANTE #{idx+1} (Tela: {k.screen_name}, Relevância: {score:.1%})] ---\n{k.business_rules}\n"
         
         full_description = description
         if learned_context_str:
-            full_description = f"{description}\n\n[MEMÓRIA COGNITIVA DO ERP ENCONTRADA]:\n{learned_context_str}"
+            full_description = f"{description}\n\n[MEMÓRIA COGNITIVA RELEVANTE DO ERP - TOP {len(relevant_knowledge)} RESULTADOS]:\n{learned_context_str}"
             
         # Enfileira a tarefa para o agente local resolver
         task = SupportTask(
@@ -419,21 +427,71 @@ Gere uma síntese técnica contendo:
             except Exception as e:
                 print(f"[UI-Scanner] Erro geral ao acionar Gemini: {e}")
 
-    # 4. Salva a base de conhecimento enriquecida no Postgres Neon
+    # 4. Gera embedding semântico das regras de negócio para busca futura
+    knowledge_embedding = None
+    if business_rules:
+        try:
+            from api.embeddings import generate_embedding
+            embedding_text = f"Tela: {screen_name}. {business_rules[:2000]}"
+            knowledge_embedding = generate_embedding(embedding_text)
+            if knowledge_embedding:
+                print(f"[UI-Scanner] 🧬 Embedding semântico gerado para '{screen_name}' ({len(knowledge_embedding)} dims).")
+        except Exception as emb_err:
+            print(f"[UI-Scanner] ⚠️ Erro ao gerar embedding: {emb_err}")
+
+    # 5. Salva a base de conhecimento enriquecida no Postgres Neon
     knowledge = ERPUIKnowledge(
         screen_name=screen_name,
         controls=controls,
         source_code=relevant_code,   # salva apenas o trecho relevante, não o ZIP inteiro
-        business_rules=business_rules
+        business_rules=business_rules,
+        embedding=knowledge_embedding
     )
     db.add(knowledge)
     db.commit()
-    return {"status": "success", "learned": business_rules is not None}
+    return {"status": "success", "learned": business_rules is not None, "has_embedding": knowledge_embedding is not None}
 
 @app.get("/api/ui-scan/knowledge")
 def get_ui_knowledge(db: Session = Depends(get_db)):
     """Carrega toda a base de conhecimento de interface gerada."""
     return db.query(ERPUIKnowledge).order_by(ERPUIKnowledge.created_at.desc()).all()
+
+@app.post("/api/knowledge/backfill-embeddings")
+def backfill_embeddings(db: Session = Depends(get_db)):
+    """Gera embeddings para todos os registros de conhecimento que ainda não possuem."""
+    try:
+        from api.embeddings import generate_embedding
+        
+        records = db.query(ERPUIKnowledge).filter(
+            ERPUIKnowledge.business_rules.isnot(None),
+            ERPUIKnowledge.embedding.is_(None)
+        ).all()
+        
+        updated = 0
+        errors = 0
+        for record in records:
+            try:
+                embedding_text = f"Tela: {record.screen_name}. {record.business_rules[:2000]}"
+                emb = generate_embedding(embedding_text)
+                if emb:
+                    record.embedding = emb
+                    updated += 1
+                    print(f"[Backfill] ✅ Embedding gerado para '{record.screen_name}'")
+                else:
+                    errors += 1
+            except Exception as e:
+                print(f"[Backfill] ⚠️ Erro ao gerar embedding para '{record.screen_name}': {e}")
+                errors += 1
+        
+        db.commit()
+        return {
+            "status": "success",
+            "total_records": len(records),
+            "updated": updated,
+            "errors": errors
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 # --- ENDPOINTS DO WORKFLOW DE QA (TESTES E MANUAIS AUTOMÁTICOS) ---
 
@@ -541,18 +599,25 @@ def post_qa_result(data: dict, db: Session = Depends(get_db)):
         
     task.status = "completed"
     
-    # Busca todo o conhecimento acumulado e regras aprendidas de código Delphi / Varredura
-    knowledge_list = db.query(ERPUIKnowledge).all()
+    # Busca semântica: encontra apenas o conhecimento RELEVANTE ao cenário de QA (Top-5)
+    from api.embeddings import find_relevant_knowledge
+    
+    all_knowledge = db.query(ERPUIKnowledge).filter(
+        ERPUIKnowledge.business_rules.isnot(None)
+    ).all()
+    
+    relevant_knowledge = find_relevant_knowledge(task.scenario or "", all_knowledge, top_k=5)
+    
     learned_memory_str = ""
-    for idx, k in enumerate(knowledge_list):
-        if k.business_rules:
-            learned_memory_str += f"\n--- [MEMÓRIA COGNITIVA ERP #{idx+1} (Tela: {k.screen_name})] ---\n{k.business_rules}\n"
+    for idx, k in enumerate(relevant_knowledge):
+        score = getattr(k, '_similarity', 0.0)
+        learned_memory_str += f"\n--- [MEMÓRIA COGNITIVA RELEVANTE #{idx+1} (Tela: {k.screen_name}, Relevância: {score:.1%})] ---\n{k.business_rules}\n"
         if k.controls:
             learned_memory_str += f"[Componentes da Tela {k.screen_name}]:\n{str(k.controls)[:80]}\n"
             
     ui_controls_str = ""
-    if knowledge_list:
-        ui_controls_str = str(knowledge_list[-1].controls[:40]) if knowledge_list[-1].controls else ""
+    if relevant_knowledge:
+        ui_controls_str = str(relevant_knowledge[0].controls[:40]) if relevant_knowledge[0].controls else ""
         
     # Acionar a inteligência para documentação
     try:

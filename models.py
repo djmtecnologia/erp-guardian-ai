@@ -74,6 +74,7 @@ class ERPUIKnowledge(Base):
     controls = Column(JSON)  # Árvore de botões, inputs, menus mapeados
     source_code = Column(Text, nullable=True)      # Cópia do código fonte da tela
     business_rules = Column(Text, nullable=True)   # Regras de Negócio aprendidas e extraídas pela IA
+    embedding = Column(JSON, nullable=True)        # Vetor de embedding semântico 768-dim (Gemini text-embedding-004)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class QATask(Base):

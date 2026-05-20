@@ -62,6 +62,10 @@ class ERPUIWatcher:
             screen_title = main_dlg.window_text() or "ERP Main Window"
             print(f"[UI-Scanner] 🎉 Login efetuado! Janela Principal: '{screen_title}'")
 
+            # 5.1 Aguarda menus do ERP carregarem completamente antes da engenharia reversa
+            print("[UI-Scanner] ⏳ Aguardando 10s para os menus do ERP carregarem completamente...")
+            time.sleep(10)
+
             # 6. Mapear e salvar a janela principal
             self._capture_and_send(task_id, app, main_dlg, screen_title)
 
