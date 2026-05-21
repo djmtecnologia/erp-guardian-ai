@@ -47,7 +47,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 def auto_create_tables():
     try:
         Base.metadata.create_all(bind=engine, checkfirst=True)
-        print("[Startup] ✅ Todas as tabelas verificadas/criadas no banco de dados.")
+        print("[Startup] Todas as tabelas verificadas/criadas no banco de dados.")
         
         # Migração segura de colunas: garante que qa_tasks e erp_scan_tasks tenham as novas colunas
         # Executa em blocos try-except individuais para manter compatibilidade total com SQLite e Postgres
@@ -96,9 +96,9 @@ def auto_create_tables():
                     # Silencia erros se a coluna já existir
                     pass
             
-            print("[Startup] 🧬 Migração segura de colunas adicionais concluída com sucesso.")
+            print("[Startup] Migracao segura de colunas adicionais concluida com sucesso.")
     except Exception as e:
-        print(f"[Startup] ⚠️ Erro ao criar/atualizar tabelas: {e}")
+        print(f"[Startup] Erro ao criar/atualizar tabelas: {e}")
 
 def get_db():
     db = SessionLocal()
