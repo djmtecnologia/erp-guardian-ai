@@ -275,6 +275,14 @@ def trigger_scan(data: dict, db: Session = Depends(get_db)):
 def append_scan_code(data: dict, db: Session = Depends(get_db)):
     task_id = data.get("task_id")
     chunk = data.get("chunk") or ""
+    
+    # Sanitiza caracteres NUL que o PostgreSQL rejeita em colunas TEXT
+    def clean_nul(val):
+        if isinstance(val, str):
+            return val.replace("\x00", "").replace("\u0000", "")
+        return val
+    
+    chunk = clean_nul(chunk)
     task = db.query(ERPScanTask).filter_by(id=task_id).first()
     if task:
         if task.source_code is None:
