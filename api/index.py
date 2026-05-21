@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 import shutil
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
+from sqlalchemy import text as sql_text
 from typing import List
 import os
 import sys
@@ -277,26 +278,30 @@ def append_scan_code(data: dict, db: Session = Depends(get_db)):
     chunk = data.get("chunk") or ""
     
     # Sanitiza caracteres NUL que o PostgreSQL rejeita em colunas TEXT
-    def clean_nul(val):
-        if isinstance(val, str):
-            return val.replace("\x00", "").replace("\u0000", "")
-        return val
+    if isinstance(chunk, str):
+        chunk = chunk.replace("\x00", "").replace("\u0000", "")
     
-    chunk = clean_nul(chunk)
-    task = db.query(ERPScanTask).filter_by(id=task_id).first()
-    if task:
-        if task.source_code is None:
-            task.source_code = chunk
-        else:
-            task.source_code += chunk
-        db.commit()
+    # CRÍTICO: Usa SQL direto para concatenar NO BANCO sem carregar o source_code inteiro na memória.
+    # O operador || do PostgreSQL faz a concatenação server-side, evitando OOM no Vercel.
+    result = db.execute(
+        sql_text(
+            "UPDATE erp_scan_tasks "
+            "SET source_code = COALESCE(source_code, '') || :chunk "
+            "WHERE id = :task_id"
+        ),
+        {"chunk": chunk, "task_id": task_id}
+    )
+    db.commit()
+    
+    if result.rowcount > 0:
         return {"status": "success"}
     return {"status": "error", "message": "Tarefa de varredura não encontrada."}
 
 @app.get("/api/ui-scan/pending")
 def get_pending_scan(db: Session = Depends(get_db)):
     """O Agente Windows consome esta rota para verificar se há tarefas."""
-    task = db.query(ERPScanTask).filter_by(status="pending").first()
+    # defer(source_code): NÃO carrega a coluna source_code (pode ter centenas de MB)
+    task = db.query(ERPScanTask).options(defer(ERPScanTask.source_code)).filter_by(status="pending").first()
     if not task:
         return {"status": "no_tasks"}
     # Marca como running para evitar que dois agentes peguem a mesma tarefa
@@ -317,7 +322,7 @@ def get_pending_scan(db: Session = Depends(get_db)):
 @app.get("/api/ui-scan/status/{task_id}")
 def get_scan_status(task_id: int, db: Session = Depends(get_db)):
     """Frontend consulta o status real de uma tarefa de varredura pelo ID."""
-    task = db.query(ERPScanTask).filter(ERPScanTask.id == task_id).first()
+    task = db.query(ERPScanTask).options(defer(ERPScanTask.source_code)).filter(ERPScanTask.id == task_id).first()
     if task:
         return {"status": task.status, "task_id": task.id}
     return {"status": "not_found"}
@@ -325,7 +330,7 @@ def get_scan_status(task_id: int, db: Session = Depends(get_db)):
 @app.post("/api/ui-scan/update")
 def update_scan_status(data: dict, db: Session = Depends(get_db)):
     """Atualiza o status da varredura executada localmente."""
-    task = db.query(ERPScanTask).filter_by(id=data.get("task_id")).first()
+    task = db.query(ERPScanTask).options(defer(ERPScanTask.source_code)).filter_by(id=data.get("task_id")).first()
     if task:
         task.status = data.get("status")
         db.commit()
@@ -343,11 +348,14 @@ def post_scan_result(data: dict, db: Session = Depends(get_db)):
     relevant_code = None
     business_rules = None
 
-    # 1. Recupera o código-fonte completo associado à tarefa
+    # 1. Recupera o código-fonte associado à tarefa via SQL direto (evita ORM carregar todo o objeto)
     if task_id:
-        task = db.query(ERPScanTask).filter_by(id=task_id).first()
-        if task and task.source_code:
-            source_code = task.source_code
+        row = db.execute(
+            sql_text("SELECT source_code FROM erp_scan_tasks WHERE id = :id"),
+            {"id": task_id}
+        ).first()
+        if row and row[0]:
+            source_code = row[0]
 
             # -------------------------------------------------------
             # 2. FILTRAGEM INTELIGENTE: extrai apenas os blocos do
@@ -536,19 +544,22 @@ def append_qa_code(data: dict, db: Session = Depends(get_db)):
     task_id = data.get("task_id")
     chunk = data.get("chunk") or ""
     
-    def clean_nul(val):
-        if isinstance(val, str):
-            return val.replace("\x00", "").replace("\u0000", "")
-        return val
+    # Sanitiza caracteres NUL que o PostgreSQL rejeita em colunas TEXT
+    if isinstance(chunk, str):
+        chunk = chunk.replace("\x00", "").replace("\u0000", "")
 
-    chunk = clean_nul(chunk)
-    task = db.query(QATask).filter_by(id=task_id).first()
-    if task:
-        if task.requirements_file_content is None:
-            task.requirements_file_content = chunk
-        else:
-            task.requirements_file_content += chunk
-        db.commit()
+    # Concatena no banco (server-side) sem carregar a coluna inteira na memória
+    result = db.execute(
+        sql_text(
+            "UPDATE qa_tasks "
+            "SET requirements_file_content = COALESCE(requirements_file_content, '') || :chunk "
+            "WHERE id = :task_id"
+        ),
+        {"chunk": chunk, "task_id": task_id}
+    )
+    db.commit()
+    
+    if result.rowcount > 0:
         return {"status": "success"}
     return {"status": "error", "message": "Tarefa de QA não encontrada."}
 
