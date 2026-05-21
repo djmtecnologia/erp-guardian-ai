@@ -35,49 +35,68 @@ async def global_exception_handler(request, exc):
 
 # DB Setup
 SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+if SQLALCHEMY_DATABASE_URL and SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Auto-cria TODAS as tabelas no Neon na inicialização da API
+# Auto-cria TODAS as tabelas na inicialização da API
 # Operação idempotente: ignora tabelas que já existem (checkfirst=True)
 @app.on_event("startup")
 def auto_create_tables():
     try:
         Base.metadata.create_all(bind=engine, checkfirst=True)
-        print("[Startup] ✅ Todas as tabelas verificadas/criadas no banco Neon.")
+        print("[Startup] ✅ Todas as tabelas verificadas/criadas no banco de dados.")
         
         # Migração segura de colunas: garante que qa_tasks e erp_scan_tasks tenham as novas colunas
+        # Executa em blocos try-except individuais para manter compatibilidade total com SQLite e Postgres
         with engine.connect() as conn:
             from sqlalchemy import text
-            # qa_tasks
-            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS exe_path TEXT;"))
-            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS username VARCHAR;"))
-            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS password VARCHAR;"))
-            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS requirements_file_name VARCHAR;"))
-            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS requirements_file_content TEXT;"))
-            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS db_object_name VARCHAR;"))
-            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS db_tns VARCHAR;"))
-            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS db_user VARCHAR;"))
-            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS db_password VARCHAR;"))
-            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS exe_version VARCHAR;"))
-            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS gef_grupo VARCHAR;"))
-            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS gef_empresa VARCHAR;"))
-            conn.execute(text("ALTER TABLE qa_tasks ADD COLUMN IF NOT EXISTS gef_filial VARCHAR;"))
             
-            # erp_scan_tasks
-            conn.execute(text("ALTER TABLE erp_scan_tasks ADD COLUMN IF NOT EXISTS exe_version VARCHAR;"))
-            conn.execute(text("ALTER TABLE erp_scan_tasks ADD COLUMN IF NOT EXISTS gef_grupo VARCHAR;"))
-            conn.execute(text("ALTER TABLE erp_scan_tasks ADD COLUMN IF NOT EXISTS gef_empresa VARCHAR;"))
-            conn.execute(text("ALTER TABLE erp_scan_tasks ADD COLUMN IF NOT EXISTS gef_filial VARCHAR;"))
-            conn.execute(text("ALTER TABLE erp_scan_tasks ADD COLUMN IF NOT EXISTS source_code TEXT;"))
+            columns_to_add = [
+                # qa_tasks
+                ("qa_tasks", "exe_path", "TEXT"),
+                ("qa_tasks", "username", "VARCHAR"),
+                ("qa_tasks", "password", "VARCHAR"),
+                ("qa_tasks", "requirements_file_name", "VARCHAR"),
+                ("qa_tasks", "requirements_file_content", "TEXT"),
+                ("qa_tasks", "db_object_name", "VARCHAR"),
+                ("qa_tasks", "db_tns", "VARCHAR"),
+                ("qa_tasks", "db_user", "VARCHAR"),
+                ("qa_tasks", "db_password", "VARCHAR"),
+                ("qa_tasks", "exe_version", "VARCHAR"),
+                ("qa_tasks", "gef_grupo", "VARCHAR"),
+                ("qa_tasks", "gef_empresa", "VARCHAR"),
+                ("qa_tasks", "gef_filial", "VARCHAR"),
+                # erp_scan_tasks
+                ("erp_scan_tasks", "exe_version", "VARCHAR"),
+                ("erp_scan_tasks", "gef_grupo", "VARCHAR"),
+                ("erp_scan_tasks", "gef_empresa", "VARCHAR"),
+                ("erp_scan_tasks", "gef_filial", "VARCHAR"),
+                ("erp_scan_tasks", "source_code", "TEXT"),
+                # erp_ui_knowledge
+                ("erp_ui_knowledge", "source_code", "TEXT"),
+                ("erp_ui_knowledge", "business_rules", "TEXT"),
+                ("erp_ui_knowledge", "embedding", "JSON")
+            ]
             
-            # erp_ui_knowledge
-            conn.execute(text("ALTER TABLE erp_ui_knowledge ADD COLUMN IF NOT EXISTS source_code TEXT;"))
-            conn.execute(text("ALTER TABLE erp_ui_knowledge ADD COLUMN IF NOT EXISTS business_rules TEXT;"))
-            conn.execute(text("ALTER TABLE erp_ui_knowledge ADD COLUMN IF NOT EXISTS embedding JSON;"))
+            is_sqlite = SQLALCHEMY_DATABASE_URL and SQLALCHEMY_DATABASE_URL.startswith("sqlite")
             
-            conn.commit()
-            print("[Startup] 🧬 Migração de colunas adicionais para qa_tasks, erp_scan_tasks e erp_ui_knowledge concluída com sucesso.")
+            for table, col, col_type in columns_to_add:
+                try:
+                    # SQLite não suporta IF NOT EXISTS em ADD COLUMN, então tentamos direto
+                    # Se der erro porque a coluna já existe, capturamos a exceção com segurança
+                    if is_sqlite:
+                        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type};"))
+                    else:
+                        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {col_type};"))
+                    conn.commit()
+                except Exception:
+                    # Silencia erros se a coluna já existir
+                    pass
+            
+            print("[Startup] 🧬 Migração segura de colunas adicionais concluída com sucesso.")
     except Exception as e:
         print(f"[Startup] ⚠️ Erro ao criar/atualizar tabelas: {e}")
 
@@ -343,13 +362,19 @@ def post_scan_result(data: dict, db: Session = Depends(get_db)):
     task_id = data.get("task_id")
     screen_name = data.get("screen_name") or "Tela ERP Mapeada"
     controls = data.get("controls")
+    local_source_code = data.get("local_source_code")
 
     source_code = None
     relevant_code = None
     business_rules = None
 
-    # 1. Recupera o código-fonte associado à tarefa via SQL direto (evita ORM carregar todo o objeto)
-    if task_id:
+    # HÍBRIDO: Se o agente já enviou o código local pareado e filtrado da tela atual,
+    # nós usamos diretamente para a inteligência, economizando cota de transferência do Neon!
+    if local_source_code:
+        print(f"[API-Result] 🧬 Usando código local pareado enviado diretamente pelo agente ({len(local_source_code)} chars)!")
+        relevant_code = local_source_code[:60_000]
+    elif task_id:
+        # 1. Fallback original: recupera o código-fonte completo associado à tarefa
         row = db.execute(
             sql_text("SELECT source_code FROM erp_scan_tasks WHERE id = :id"),
             {"id": task_id}
@@ -360,8 +385,6 @@ def post_scan_result(data: dict, db: Session = Depends(get_db)):
             # -------------------------------------------------------
             # 2. FILTRAGEM INTELIGENTE: extrai apenas os blocos do
             #    arquivo fonte que correspondem ao nome da tela atual.
-            #    O código completo fica no banco; o Gemini só recebe
-            #    o trecho relevante (até 60.000 chars).
             # -------------------------------------------------------
             import re
 

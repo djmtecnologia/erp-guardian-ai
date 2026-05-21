@@ -392,6 +392,68 @@ class ERPUIWatcher:
     # ------------------------------------------------------------------
     # CAPTURAR ÁRVORE DE CONTROLES E ENVIAR
     # ------------------------------------------------------------------
+    def _find_local_source_code(self, screen_name: str) -> str:
+        """
+        Busca recursivamente no diretório de código local (configurado via LOCAL_VCS_PATH)
+        por arquivos Delphi (.pas, .dfm) correspondentes à tela mapeada.
+        """
+        import os
+        import re
+        
+        local_path = os.getenv("LOCAL_VCS_PATH", "./")
+        if not os.path.exists(local_path):
+            return ""
+            
+        # Normaliza palavras-chave da tela para buscar arquivos
+        screen_slug = re.sub(r'[^a-zA-Z0-9]', '', screen_name.lower())
+        screen_words = [w for w in re.findall(r'[a-zA-Z]{3,}', screen_slug) if w not in ('tela', 'form', 'frm', 'unit', 'main', 'window')]
+        
+        if not screen_words:
+            # Caso o título seja genérico (ex: "Geral"), tenta pegar o slug inteiro
+            screen_words = [screen_slug] if len(screen_slug) > 2 else []
+            
+        if not screen_words:
+            return ""
+            
+        print(f"[UI-Scanner] 🔍 Buscando código fonte local pareado em '{local_path}' para a tela '{screen_name}' (Palavras: {screen_words})...")
+        
+        matched_content = []
+        
+        # Faz uma busca de arquivos na pasta de fontes (.pas, .dfm)
+        for root, _, files in os.walk(local_path):
+            for file in files:
+                if file.lower().endswith(('.pas', '.dfm')):
+                    file_lower = file.lower()
+                    
+                    # Match 1: O nome do arquivo contém o termo chave da tela (ex: uconfirm.pas para "Confirm")
+                    is_match = any(w in file_lower for w in screen_words)
+                    
+                    # Match 2: Caso o nome da tela ou das palavras-chave estejam declarados dentro do arquivo
+                    if not is_match and len(matched_content) < 3: # limite para não sobrecarregar
+                        try:
+                            file_path = os.path.join(root, file)
+                            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                head = f.read(2000)
+                                if any(w in head.lower() for w in screen_words):
+                                    is_match = True
+                        except Exception:
+                            pass
+                            
+                    if is_match:
+                        file_path = os.path.join(root, file)
+                        try:
+                            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                content = f.read()
+                                matched_content.append(f"--- ARQUIVO FONTE: {file} ---\n{content}")
+                                print(f"[UI-Scanner] 🎯 Fonte local pareado com sucesso: {file} ({len(content)} bytes)")
+                        except Exception as e:
+                            print(f"[UI-Scanner] Erro ao ler fonte local {file}: {e}")
+                            
+            if len(matched_content) >= 3: # Limita a até 3 fontes por tela
+                break
+                
+        return "\n\n".join(matched_content)
+
     def _capture_and_send(self, task_id: int, app, dlg, screen_name: str):
         """Coleta a árvore de controles da janela e envia para o backend."""
         try:
@@ -410,14 +472,25 @@ class ERPUIWatcher:
                 except Exception:
                     continue
 
+            # Tenta buscar os arquivos Delphi correspondentes localmente para enviar de forma híbrida
+            local_code = ""
+            try:
+                local_code = self._find_local_source_code(screen_name)
+            except Exception as le:
+                print(f"[UI-Scanner] ⚠️ Falha na busca de código fonte local: {le}")
+
             payload = {
                 "task_id": task_id,
                 "screen_name": screen_name,
                 "controls": ui_tree
             }
+            
+            if local_code:
+                payload["local_source_code"] = local_code
+
             resp = requests.post(f"{self.backend_url}/api/ui-scan/result", json=payload, timeout=30)
             if resp.status_code == 200:
-                print(f"[UI-Scanner]   ✅ '{screen_name}' enviada ({len(ui_tree)} controles).")
+                print(f"[UI-Scanner]   ✅ '{screen_name}' enviada ({len(ui_tree)} controles). Código pareado: {len(local_code) > 0}")
             else:
                 print(f"[UI-Scanner]   ⚠ Erro ao enviar '{screen_name}': HTTP {resp.status_code}")
         except Exception as e:
